@@ -1,0 +1,48 @@
+QDialog#LoginDialog {
+    background-color: #4169E1;          /* 皇家蓝背景 */
+    border: 2px solid #2a4dbb;         /* 稍深的边框 */
+    border-radius: 10px;
+    color: white;                      /* 白色文字 */
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+QWidget#widget {
+    background-color: white;
+}
+
+/* 正常状态 */
+QPushButton#login_btn, #register_btn {
+    background-color: #87CEEB;
+    color: #2c3e50;
+    border: 2px solid #5dade2;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 14px;
+}
+
+/* hover 状态 - 鼠标悬停 */
+QPushButton#login_btn:hover, #register_btn:hover {
+    background-color: #5dade2;
+    color: white;
+    border-color: #3498db;
+}
+
+/* pressed 状态 - 鼠标按下 */
+QPushButton#login_btn:pressed, #register_btn:pressed {
+    background-color: #3498db;
+    color: white;
+    border-color: #2980b9;
+    padding-top: 9px;        /* 制造按下效果 */
+    padding-bottom: 7px;
+}
+
+QLabel#label_2 {
+    font-family: "黑体";
+    color: #0000FF;      /* 纯蓝色 */
+    font-weight: bold;   /* 加粗 */
+    font-size: 30px;
+}
+
+QLabel#message_label {
+    color: red;
+}

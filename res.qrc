@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/">
+        <file>res/qss/login.qss</file>
+        <file>res/pic/login.png</file>
+        <file>res/icon/user.svg</file>
+        <file>res/icon/password.svg</file>
+    </qresource>
+</RCC>
