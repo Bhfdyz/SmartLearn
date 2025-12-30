@@ -1,3 +1,6 @@
+# Qt 构建文件
+build*/*
+
 # C++ objects and libs
 *.slo
 *.lo
