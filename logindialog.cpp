@@ -1,6 +1,7 @@
 #include "logindialog.h"
 #include "ui_logindialog.h"
 #include "connectmanager.h"
+#include "config.h"
 
 #include <QFile>
 #include <QDebug>
@@ -61,6 +62,7 @@ void LoginDialog::on_login_btn_clicked()
     _user = ui->user->text();
     _pass = ui->password->text();
     QJsonObject jsonobj;
+    jsonobj.insert("type", LoginType);
     jsonobj.insert("user", ui->user->text());
     jsonobj.insert("password", ui->password->text());
     QJsonDocument jsondoc(jsonobj);
