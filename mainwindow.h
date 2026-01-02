@@ -1,8 +1,11 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "databasemanager.h"
+
 #include <QMainWindow>
 #include <QTcpServer>
+#include <QSqlDatabase>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -21,6 +24,7 @@ public:
 private:
     Ui::MainWindow *ui;
     QTcpServer *_server;
+    QSqlDatabase _db;
 
 private slots:
     void SlotNewClient();
