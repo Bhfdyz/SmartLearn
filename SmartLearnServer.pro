@@ -16,7 +16,8 @@ SOURCES += \
 HEADERS += \
     config.h \
     databasemanager.h \
-    mainwindow.h
+    mainwindow.h \
+    user.h
 
 FORMS += \
     mainwindow.ui
