@@ -10,19 +10,25 @@ CONFIG += c++17
 
 SOURCES += \
     connectmanager.cpp \
+    knowledgedialog.cpp \
     logindialog.cpp \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    registerdialog.cpp
 
 HEADERS += \
     config.h \
     connectmanager.h \
+    knowledgedialog.h \
     logindialog.h \
-    mainwindow.h
+    mainwindow.h \
+    registerdialog.h
 
 FORMS += \
+    knowledgedialog.ui \
     logindialog.ui \
-    mainwindow.ui
+    mainwindow.ui \
+    registerdialog.ui
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
