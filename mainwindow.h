@@ -48,7 +48,8 @@ private:
     void handleSaveKnowledgeRequest(const QJsonObject &json, QTcpSocket *socket);  // 保存知识库
     void handleGetKnowledgeRequest(const QJsonObject &json, QTcpSocket *socket);    // 获取知识库
     void sendKnowledgeResponse(QTcpSocket *socket, const QString &status,
-                               const QString &message, const QStringList &knowledgeList = QStringList());  // 发送知识库响应
+                               const QString &message, const QStringList &knowledgeList = QStringList(),
+                               const QString &learningGoal = "");  // 发送知识库响应
 
     // ========== 验证方法 ==========
     bool validateUsername(const QString &username);

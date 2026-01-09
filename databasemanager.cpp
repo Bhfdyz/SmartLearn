@@ -116,6 +116,20 @@ bool DatabaseManager::createTables()
         return false;
     }
 
+    // 设置忙碌超时时间（毫秒）- 在 WAL 之前设置
+    if (!query.exec("PRAGMA busy_timeout=5000")) {
+        qDebug() << "设置 busy_timeout 失败: " << query.lastError().text();
+    }
+
+    // 启用 WAL 模式以提高并发性能
+    if (!query.exec("PRAGMA journal_mode=WAL")) {
+        qDebug() << "启用 WAL 模式失败: " << query.lastError().text();
+        qDebug() << "注意：可能有其他程序正在访问数据库，请关闭其他实例后重试";
+    } else {
+        QString mode = query.next() ? query.value(0).toString() : "";
+        qDebug() << "WAL 模式已启用:" << mode;
+    }
+
     qDebug() << "数据库表创建成功";
     return true;
 }
@@ -195,7 +209,7 @@ User DatabaseManager::getUserByUsername(const QString &username)
 {
     User user;
     QSqlQuery query(_db);
-    query.prepare("SELECT user_id, username, email, phone, grade, major, role, status, created_at, last_login "
+    query.prepare("SELECT user_id, username, email, phone, grade, major, learning_goal, role, status, created_at, last_login "
                   "FROM users WHERE username = :username");
     query.bindValue(":username", username);
 
@@ -206,11 +220,12 @@ User DatabaseManager::getUserByUsername(const QString &username)
         user.phone = query.value(3).toString();
         user.grade = query.value(4).toString();
         user.major = query.value(5).toString();
-        QString roleStr = query.value(6).toString();
+        user.learning_goal = query.value(6).toString();
+        QString roleStr = query.value(7).toString();
         user.role = (roleStr == "admin") ? ROLE_ADMIN : ROLE_STUDENT;
-        user.status = query.value(7).toInt();
-        user.created_at = query.value(8).toDateTime();
-        user.last_login = query.value(9).toDateTime();
+        user.status = query.value(8).toInt();
+        user.created_at = query.value(9).toDateTime();
+        user.last_login = query.value(10).toDateTime();
     }
 
     return user;

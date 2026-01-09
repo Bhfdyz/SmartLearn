@@ -24,6 +24,7 @@ struct User {
     QString phone;            // 手机号
     QString grade;            // 年级
     QString major;            // 专业
+    QString learning_goal;    // 学习目标
     UserRole role;            // 角色
     int status;               // 状态：1-正常，0-禁用
     QDateTime created_at;     // 创建时间

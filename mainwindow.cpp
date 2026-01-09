@@ -3,9 +3,11 @@
 #include "config.h"
 
 #include <QDebug>
+#include <QThread>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSqlQuery>
+#include <QSqlError>
 #include <QTcpSocket>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -35,10 +37,11 @@ MainWindow::~MainWindow()
 
 void MainWindow::SlotNewClient()
 {
-    if (_server->hasPendingConnections()) {
-        QTcpSocket *socket = _server->nextPendingConnection();
+    QTcpSocket *socket = _server->nextPendingConnection();
+    if (socket) {
         connect(socket, &QTcpSocket::readyRead,
             this, &MainWindow::SlotReadFromClient);
+        qDebug() << "新客户端已连接";
     }
 }
 
@@ -46,9 +49,19 @@ void MainWindow::SlotReadFromClient()
 {
     QTcpSocket *tmpsocket = qobject_cast<QTcpSocket*>(sender());
     QByteArray revData = tmpsocket->readAll();
+
+    qDebug() << "=== 服务端收到数据 ===";
+    qDebug() << "原始数据:" << revData;
+
     QJsonDocument jsondoc = QJsonDocument::fromJson(revData);
+    if (jsondoc.isNull() || !jsondoc.isObject()) {
+        qDebug() << "JSON解析失败！";
+        return;
+    }
+
     QJsonObject jsonobj = jsondoc.object();
     QString type = jsonobj["type"].toString();
+    qDebug() << "请求类型:" << type;
 
     if (type == LoginType) {
         handleLoginRequest(jsonobj, tmpsocket);
@@ -61,6 +74,9 @@ void MainWindow::SlotReadFromClient()
     }
     else if (type == GetKnowledgeType) {
         handleGetKnowledgeRequest(jsonobj, tmpsocket);
+    }
+    else {
+        qDebug() << "未知的请求类型:" << type;
     }
 }
 
@@ -78,8 +94,8 @@ void MainWindow::handleLoginRequest(const QJsonObject &json, QTcpSocket *socket)
         // 获取用户信息并更新登录时间
         User userInfo = DatabaseManager::getInstance().getUserByUsername(user);
         DatabaseManager::getInstance().updateUserLastLogin(userInfo.user_id);
-        DatabaseManager::getInstance().logUserAction(userInfo.user_id, "login",
-                                                       socket->peerAddress().toString());
+        // 暂时移除日志记录以避免数据库锁定
+        // DatabaseManager::getInstance().logUserAction(userInfo.user_id, "login", socket->peerAddress().toString());
 
         qDebug() << "用户登录成功: " << user;
         socket->write("yes");
@@ -118,7 +134,7 @@ void MainWindow::handleRegisterRequest(const QJsonObject &json, QTcpSocket *sock
     if (!validatePassword(password)) {
         qDebug() << "密码验证失败";
         sendRegisterResponse(socket, "error", INVALID_PASSWORD,
-                            "密码强度不足（至少8位，包含字母和数字）");
+                            "密码长度不足（至少6位）");
         return;
     }
 
@@ -171,13 +187,8 @@ void MainWindow::handleRegisterRequest(const QJsonObject &json, QTcpSocket *sock
         User insertedUser = DatabaseManager::getInstance().getUserByUsername(username);
         int newUserId = insertedUser.user_id;
 
-        // 记录日志
-        DatabaseManager::getInstance().logUserAction(
-            newUserId,
-            "register",
-            socket->peerAddress().toString(),
-            "User registered successfully: " + username
-        );
+        // 暂时移除日志记录以避免数据库锁定
+        // DatabaseManager::getInstance().logUserAction(newUserId, "register", socket->peerAddress().toString(), "User registered: " + username);
 
         qDebug() << "用户注册成功 - 用户名:" << username << "ID:" << newUserId;
 
@@ -213,10 +224,11 @@ void MainWindow::sendRegisterResponse(QTcpSocket *socket, const QString &status,
 
     socket->write(data);
     socket->flush();
-    socket->waitForBytesWritten(1000);  // 等待1秒确保数据发送到缓冲区
 
-    qDebug() << "响应发送完成，关闭socket";
-    socket->disconnectFromHost();
+    qDebug() << "注册响应发送完成，保持连接";
+
+    // 不关闭连接，让客户端保持连接以便后续登录
+    // socket->disconnectFromHost();
 }
 
 // ========== 验证方法 ==========
@@ -235,21 +247,12 @@ bool MainWindow::validateUsername(const QString &username)
 
 bool MainWindow::validatePassword(const QString &password)
 {
-    // 长度检查
-    if (password.length() < 8) {
+    // 只检查长度，至少6位
+    if (password.length() < 6) {
         return false;
     }
 
-    // 复杂度检查：必须包含字母和数字
-    bool hasLetter = false;
-    bool hasDigit = false;
-
-    for (const QChar &ch : password) {
-        if (ch.isLetter()) hasLetter = true;
-        if (ch.isDigit()) hasDigit = true;
-    }
-
-    return hasLetter && hasDigit;
+    return true;
 }
 
 bool MainWindow::validateEmail(const QString &email)
@@ -272,7 +275,10 @@ void MainWindow::handleSaveKnowledgeRequest(const QJsonObject &json, QTcpSocket 
     QString learning_goal = json["learning_goal"].toString();
     QJsonArray knowledgeArray = json["knowledge_points"].toArray();
 
+    qDebug() << "=== handleSaveKnowledgeRequest 开始 ===";
     qDebug() << "收到保存知识库请求 - 用户名:" << username;
+    qDebug() << "学习目标:" << learning_goal;
+    qDebug() << "知识点数:" << knowledgeArray.size();
 
     // 获取用户信息
     User user = DatabaseManager::getInstance().getUserByUsername(username);
@@ -281,34 +287,68 @@ void MainWindow::handleSaveKnowledgeRequest(const QJsonObject &json, QTcpSocket 
         sendKnowledgeResponse(socket, "error", "用户不存在");
         return;
     }
+    qDebug() << "找到用户，user_id:" << user.user_id;
 
-    // 清空原有知识点
-    DatabaseManager::getInstance().clearUserKnowledge(user.user_id);
+    // 使用事务来避免数据库锁定
+    QSqlDatabase &db = DatabaseManager::getInstance().getDatabase();
+    db.transaction();
 
-    // 保存学习目标
+    // 保存学习目标（如果提供了）
+    bool hasError = false;
     if (!learning_goal.isEmpty()) {
-        DatabaseManager::getInstance().updateUserLearningGoal(user.user_id, learning_goal);
-    }
-
-    // 添加新知识点
-    for (const QJsonValue &value : knowledgeArray) {
-        QString point = value.toString();
-        if (!point.isEmpty()) {
-            DatabaseManager::getInstance().addKnowledgePoint(user.user_id, point);
+        QSqlQuery query(db);
+        query.prepare("UPDATE users SET learning_goal = :goal WHERE user_id = :user_id");
+        query.bindValue(":goal", learning_goal);
+        query.bindValue(":user_id", user.user_id);
+        if (!query.exec()) {
+            qDebug() << "学习目标更新失败:" << query.lastError().text();
+            hasError = true;
+        } else {
+            qDebug() << "学习目标已更新";
         }
     }
 
-    // 记录日志
-    DatabaseManager::getInstance().logUserAction(
-        user.user_id,
-        "save_knowledge",
-        socket->peerAddress().toString(),
-        "User saved " + QString::number(knowledgeArray.size()) + " knowledge points"
-    );
+    // 追加新知识点（不删除已存在的）
+    for (const QJsonValue &value : knowledgeArray) {
+        QString point = value.toString();
+        if (!point.isEmpty()) {
+            QSqlQuery checkQuery(db);
+            checkQuery.prepare("SELECT COUNT(*) FROM user_knowledge WHERE user_id = :user_id AND knowledge_point = :point");
+            checkQuery.bindValue(":user_id", user.user_id);
+            checkQuery.bindValue(":point", point);
 
-    qDebug() << "知识库保存成功 - 用户名:" << username << "知识点数:" << knowledgeArray.size();
+            if (checkQuery.exec() && checkQuery.next() && checkQuery.value(0).toInt() > 0) {
+                // 已存在，跳过
+                qDebug() << "知识点已存在，跳过:" << point;
+                continue;
+            }
 
-    sendKnowledgeResponse(socket, "success", "知识库保存成功");
+            // 插入新知识点
+            QSqlQuery insertQuery(db);
+            insertQuery.prepare("INSERT INTO user_knowledge (user_id, knowledge_point) VALUES (:user_id, :point)");
+            insertQuery.bindValue(":user_id", user.user_id);
+            insertQuery.bindValue(":point", point);
+            if (!insertQuery.exec()) {
+                qDebug() << "知识点添加失败:" << point << insertQuery.lastError().text();
+                hasError = true;
+            } else {
+                qDebug() << "知识点已添加:" << point;
+            }
+        }
+    }
+
+    if (hasError) {
+        db.rollback();
+        qDebug() << "事务回滚";
+        sendKnowledgeResponse(socket, "error", "保存失败");
+    } else {
+        db.commit();
+        qDebug() << "事务提交成功";
+        qDebug() << "知识库保存成功 - 用户名:" << username << "知识点数:" << knowledgeArray.size();
+        sendKnowledgeResponse(socket, "success", "知识库保存成功");
+    }
+
+    qDebug() << "=== handleSaveKnowledgeRequest 结束 ===";
 }
 
 void MainWindow::handleGetKnowledgeRequest(const QJsonObject &json, QTcpSocket *socket)
@@ -328,14 +368,21 @@ void MainWindow::handleGetKnowledgeRequest(const QJsonObject &json, QTcpSocket *
     // 获取知识点列表
     QStringList knowledgePoints = DatabaseManager::getInstance().getUserKnowledgePoints(user.user_id);
 
-    qDebug() << "获取知识库成功 - 用户名:" << username << "知识点数:" << knowledgePoints.size();
+    // 获取学习目标
+    QString learningGoal = user.learning_goal;
 
-    sendKnowledgeResponse(socket, "success", "获取成功", knowledgePoints);
+    qDebug() << "获取知识库成功 - 用户名:" << username << "知识点数:" << knowledgePoints.size() << "学习目标:" << learningGoal;
+
+    sendKnowledgeResponse(socket, "success", "获取成功", knowledgePoints, learningGoal);
 }
 
 void MainWindow::sendKnowledgeResponse(QTcpSocket *socket, const QString &status,
-                                      const QString &message, const QStringList &knowledgeList)
+                                      const QString &message, const QStringList &knowledgeList,
+                                      const QString &learningGoal)
 {
+    qDebug() << "=== sendKnowledgeResponse 开始 ===";
+    qDebug() << "socket状态:" << socket->state();
+
     QJsonObject json;
     json["type"] = "KnowledgeResponse";
     json["status"] = status;
@@ -349,13 +396,21 @@ void MainWindow::sendKnowledgeResponse(QTcpSocket *socket, const QString &status
         json["knowledge_points"] = knowledgeArray;
     }
 
+    // 添加学习目标字段
+    json["learning_goal"] = learningGoal;
+
     QJsonDocument doc(json);
     QByteArray data = doc.toJson();
 
-    qDebug() << "发送知识库响应:" << status;
+    qDebug() << "响应数据:" << data;
+    qDebug() << "响应长度:" << data.length();
 
-    socket->write(data);
+    // 写入数据
+    qint64 bytesWritten = socket->write(data);
     socket->flush();
-    socket->waitForBytesWritten(1000);
-    socket->disconnectFromHost();
+
+    qDebug() << "已发送知识库响应:" << bytesWritten << "字节, status:" << status;
+
+    // 不要关闭连接，让客户端保持连接以便后续通信
+    // 客户端收到响应后会自动关闭对话框
 }
