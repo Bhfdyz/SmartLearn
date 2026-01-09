@@ -21,12 +21,14 @@ public:
     explicit KnowledgeDialog(const QString &username, QWidget *parent = nullptr);
     ~KnowledgeDialog();
 
+public slots:
+    void SlotReadFromServer();          // 接收服务器响应
+
 private slots:
     void onAddKnowledge();              // 添加知识点
     void onRemoveKnowledge();           // 删除选中的知识点
     void onSave();                      // 保存知识库
     void onSkip();                      // 跳过
-    void SlotReadFromServer();          // 接收服务器响应
 
 private:
     Ui::KnowledgeDialog *ui;
@@ -44,6 +46,7 @@ private:
     QLabel *_count_label;               // 知识点计数标签
 
     void setupUI();                     // 设置UI布局
+    void loadKnowledge();               // 从服务器加载已有知识点
 };
 
 #endif // KNOWLEDGEDIALOG_H

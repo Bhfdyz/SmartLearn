@@ -21,6 +21,8 @@ KnowledgeDialog::KnowledgeDialog(const QString &username, QWidget *parent)
 
     setWindowTitle("填写我的知识库");
     setFixedSize(600, 550);
+    setModal(false);  // 改为非模态，避免阻塞事件循环
+    setWindowModality(Qt::ApplicationModal);  // 但仍然阻止操作其他窗口
 
     setupUI();
 
@@ -110,14 +112,38 @@ KnowledgeDialog::KnowledgeDialog(const QString &username, QWidget *parent)
     ConnectManager &manager = ConnectManager::getInstance();
     _client = manager.getSocket();
 
-    // 连接服务器响应信号槽
+    qDebug() << "=== KnowledgeDialog构造 ===";
+    qDebug() << "当前socket状态:" << _client->state();
+
+    // 确保socket已连接
+    if (_client->state() != QAbstractSocket::ConnectedState) {
+        qDebug() << "Socket未连接，尝试重新连接";
+        _client->abort();
+        _client->connectToHost("127.0.0.1", 8080);
+        if (!_client->waitForConnected(3000)) {
+            qDebug() << "Socket连接失败:" << _client->errorString();
+        } else {
+            qDebug() << "Socket重新连接成功";
+        }
+    }
+
+    // 先断开所有已存在的连接，避免冲突
     disconnect(_client, &QTcpSocket::readyRead, nullptr, nullptr);
-    connect(_client, &QTcpSocket::readyRead,
-            this, &KnowledgeDialog::SlotReadFromServer);
+
+    // 连接readyRead信号
+    connect(_client, &QTcpSocket::readyRead, this, &KnowledgeDialog::SlotReadFromServer);
+    qDebug() << "已连接KnowledgeDialog::SlotReadFromServer到readyRead信号";
+
+    // 加载已有知识点
+    loadKnowledge();
 }
 
 KnowledgeDialog::~KnowledgeDialog()
 {
+    // 断开信号连接
+    if (_client) {
+        disconnect(_client, &QTcpSocket::readyRead, this, &KnowledgeDialog::SlotReadFromServer);
+    }
     delete ui;
 }
 
@@ -265,7 +291,8 @@ void KnowledgeDialog::onSave()
 
     QJsonDocument doc(json);
 
-    // 检查socket连接
+    // 检查socket连接状态
+    qDebug() << "当前socket状态:" << _client->state();
     if (_client->state() != QAbstractSocket::ConnectedState) {
         qDebug() << "Socket未连接，尝试重新连接";
         _client->abort();
@@ -274,18 +301,69 @@ void KnowledgeDialog::onSave()
             QMessageBox::warning(this, "连接错误", "无法连接到服务器");
             return;
         }
+        qDebug() << "重新连接成功，状态:" << _client->state();
     }
-
-    // 发送请求
-    _client->write(doc.toJson());
-    _client->flush();
-
-    qDebug() << "发送保存知识库请求:" << _username;
 
     // 禁用按钮
     _save_btn->setEnabled(false);
     _skip_btn->setEnabled(false);
     _save_btn->setText("保存中...");
+
+    // 发送前断开信号，避免 SlotReadFromServer() 与 waitForReadyRead() 冲突
+    disconnect(_client, &QTcpSocket::readyRead, this, &KnowledgeDialog::SlotReadFromServer);
+
+    // 发送请求
+    QByteArray data = doc.toJson();
+    qDebug() << "发送保存知识库请求:" << _username;
+    qDebug() << "请求数据:" << data;
+
+    qint64 bytesWritten = _client->write(data);
+    _client->flush();
+
+    qDebug() << "已写入" << bytesWritten << "字节";
+
+    // 直接等待响应，不依赖信号
+    if (_client->waitForReadyRead(5000)) {
+        QByteArray responseData = _client->readAll();
+        qDebug() << "收到响应数据:" << responseData;
+
+        QJsonDocument responseDoc = QJsonDocument::fromJson(responseData);
+        if (!responseDoc.isNull() && responseDoc.isObject()) {
+            QJsonObject responseJson = responseDoc.object();
+            QString type = responseJson["type"].toString();
+            QString status = responseJson["status"].toString();
+            QString message = responseJson["message"].toString();
+            qDebug() << "响应类型:" << type << "状态:" << status;
+
+            if (type == "KnowledgeResponse" && status == "success") {
+                QMessageBox::information(this, "保存成功", message);
+                accept();
+            } else {
+                QMessageBox::warning(this, "保存失败", message);
+                _save_btn->setEnabled(true);
+                _skip_btn->setEnabled(true);
+                _save_btn->setText("保存并继续");
+                // 重新连接信号，以便下次操作
+                connect(_client, &QTcpSocket::readyRead, this, &KnowledgeDialog::SlotReadFromServer);
+            }
+        } else {
+            qDebug() << "响应解析失败";
+            QMessageBox::warning(this, "错误", "服务器响应格式错误");
+            _save_btn->setEnabled(true);
+            _skip_btn->setEnabled(true);
+            _save_btn->setText("保存并继续");
+            // 重新连接信号，以便下次操作
+            connect(_client, &QTcpSocket::readyRead, this, &KnowledgeDialog::SlotReadFromServer);
+        }
+    } else {
+        qDebug() << "等待响应超时";
+        QMessageBox::warning(this, "超时", "服务器无响应，请检查网络连接");
+        _save_btn->setEnabled(true);
+        _skip_btn->setEnabled(true);
+        _save_btn->setText("保存并继续");
+        // 重新连接信号，以便下次操作
+        connect(_client, &QTcpSocket::readyRead, this, &KnowledgeDialog::SlotReadFromServer);
+    }
 }
 
 void KnowledgeDialog::onSkip()
@@ -297,16 +375,34 @@ void KnowledgeDialog::onSkip()
 void KnowledgeDialog::SlotReadFromServer()
 {
     QByteArray data = _client->readAll();
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    QJsonObject json = doc.object();
+    qDebug() << "=== KnowledgeDialog::SlotReadFromServer 被调用 ===";
+    qDebug() << "响应数据:" << data;
+    qDebug() << "响应长度:" << data.length();
 
+    if (data.isEmpty()) {
+        qDebug() << "收到空数据，忽略";
+        return;
+    }
+
+    // 先尝试解析JSON
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (doc.isNull() || !doc.isObject()) {
+        qDebug() << "不是JSON格式，可能是登录响应或其他非知识库响应，忽略";
+        return;  // 不是知识库相关的JSON响应，忽略
+    }
+
+    QJsonObject json = doc.object();
     QString type = json["type"].toString();
+    qDebug() << "响应类型:" << type;
+
     if (type != "KnowledgeResponse") {
+        qDebug() << "不是KnowledgeResponse，忽略";
         return;
     }
 
     QString status = json["status"].toString();
     QString message = json["message"].toString();
+    qDebug() << "状态:" << status << "消息:" << message;
 
     // 恢复按钮状态
     _save_btn->setEnabled(true);
@@ -315,8 +411,77 @@ void KnowledgeDialog::SlotReadFromServer()
 
     if (status == "success") {
         QMessageBox::information(this, "保存成功", message);
-        accept();  // 关闭对话框
+        accept();  // 关闭对话框，进入主窗口
     } else {
         QMessageBox::warning(this, "保存失败", message);
     }
+}
+
+void KnowledgeDialog::loadKnowledge()
+{
+    qDebug() << "=== loadKnowledge 开始 ===";
+
+    // 构造获取知识库请求
+    QJsonObject json;
+    json["type"] = GetKnowledgeType;
+    json["username"] = _username;
+
+    QJsonDocument doc(json);
+    QByteArray data = doc.toJson();
+
+    qDebug() << "发送获取知识库请求:" << _username;
+
+    // 断开信号，使用同步等待
+    disconnect(_client, &QTcpSocket::readyRead, this, &KnowledgeDialog::SlotReadFromServer);
+
+    // 发送请求
+    _client->write(data);
+    _client->flush();
+
+    // 等待响应
+    if (_client->waitForReadyRead(3000)) {
+        QByteArray responseData = _client->readAll();
+        qDebug() << "收到知识库数据:" << responseData;
+
+        QJsonDocument responseDoc = QJsonDocument::fromJson(responseData);
+        if (!responseDoc.isNull() && responseDoc.isObject()) {
+            QJsonObject responseJson = responseDoc.object();
+            QString type = responseJson["type"].toString();
+            QString status = responseJson["status"].toString();
+
+            if (type == "KnowledgeResponse" && status == "success") {
+                QJsonArray knowledgeArray = responseJson["knowledge_points"].toArray();
+
+                // 清空列表
+                _knowledge_list->clear();
+
+                // 填充知识点
+                for (const QJsonValue &value : knowledgeArray) {
+                    QString point = value.toString();
+                    _knowledge_list->addItem(point);
+                }
+
+                // 更新计数
+                _count_label->setText(QString("共 %1 个").arg(_knowledge_list->count()));
+
+                qDebug() << "知识库加载成功，共" << knowledgeArray.size() << "个知识点";
+
+                // 尝试获取学习目标
+                if (responseJson.contains("learning_goal")) {
+                    _goal_edit->setText(responseJson["learning_goal"].toString());
+                }
+            } else {
+                qDebug() << "获取知识库失败:" << responseJson["message"].toString();
+            }
+        } else {
+            qDebug() << "响应解析失败";
+        }
+    } else {
+        qDebug() << "获取知识库超时";
+    }
+
+    // 重连信号
+    connect(_client, &QTcpSocket::readyRead, this, &KnowledgeDialog::SlotReadFromServer);
+
+    qDebug() << "=== loadKnowledge 结束 ===";
 }

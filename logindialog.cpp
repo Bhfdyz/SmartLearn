@@ -11,6 +11,7 @@
 #include <QStyle>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 
 LoginDialog::LoginDialog(QWidget *parent)
     : QDialog(parent)
@@ -77,11 +78,17 @@ void LoginDialog::on_login_btn_clicked()
 
 void LoginDialog::on_register_btn_clicked()
 {
+    // 断开LoginDialog的信号连接，避免与RegisterDialog冲突
+    disconnect(_client, &QTcpSocket::readyRead, this, &LoginDialog::SlotReadFromServer);
+
     // 创建注册对话框
     RegisterDialog registerDlg(this);
 
     // 以模态方式显示
     int result = registerDlg.exec();
+
+    // 重新连接LoginDialog的信号
+    connect(_client, &QTcpSocket::readyRead, this, &LoginDialog::SlotReadFromServer);
 
     // 注册成功后返回登录界面
     if (result == QDialog::Accepted) {
@@ -96,27 +103,79 @@ void LoginDialog::on_register_btn_clicked()
 // 处理server回复
 void LoginDialog::SlotReadFromServer()
 {
-    // 使用 peek() 查看数据但不消费，让RegisterDialog也能读取
-    QByteArray data = _client->peek(_client->bytesAvailable());
+    QByteArray data = _client->readAll();
+    qDebug() << "LoginDialog收到数据:" << data;
 
     // 检查是否为JSON格式的响应
     QJsonDocument jsonDoc = QJsonDocument::fromJson(data);
     if (!jsonDoc.isNull() && jsonDoc.isObject()) {
         QJsonObject jsonObj = jsonDoc.object();
         QString type = jsonObj["type"].toString();
+        qDebug() << "LoginDialog收到的JSON类型:" << type;
         // 如果是注册响应或知识库响应，不处理
         if (type == "RegisterResponse" || type == "KnowledgeResponse") {
+            qDebug() << "LoginDialog忽略" << type << "消息";
             return;
         }
     }
 
-    // 处理登录响应 - 使用readAll()消费数据
-    data = _client->readAll();
+    // 处理登录响应
     QString reply = QString::fromUtf8(data);
     if (reply == "yes") {
-        // 登录成功，打开知识库填写对话框
-        KnowledgeDialog knowledgeDlg(_user, this);
-        knowledgeDlg.exec();
+        qDebug() << "登录成功，检查用户知识库状态";
+
+        // 断开LoginDialog的信号连接，避免冲突
+        disconnect(_client, &QTcpSocket::readyRead, this, &LoginDialog::SlotReadFromServer);
+
+        // 先查询用户是否已有知识库数据
+        QJsonObject json;
+        json["type"] = GetKnowledgeType;
+        json["username"] = _user;
+        QJsonDocument doc(json);
+        _client->write(doc.toJson());
+        _client->flush();
+
+        // 等待知识库响应
+        if (_client->waitForReadyRead(3000)) {
+            QByteArray responseData = _client->readAll();
+            QJsonDocument responseDoc = QJsonDocument::fromJson(responseData);
+
+            if (!responseDoc.isNull() && responseDoc.isObject()) {
+                QJsonObject responseJson = responseDoc.object();
+                QString type = responseJson["type"].toString();
+                QString status = responseJson["status"].toString();
+
+                if (type == "KnowledgeResponse" && status == "success") {
+                    QJsonArray knowledgeArray = responseJson["knowledge_points"].toArray();
+
+                    if (knowledgeArray.isEmpty()) {
+                        // 用户没有知识库数据，弹出填写对话框
+                        qDebug() << "用户无知识库数据，打开填写对话框";
+                        KnowledgeDialog knowledgeDlg(_user, this);
+                        knowledgeDlg.exec();
+                    } else {
+                        qDebug() << "用户已有知识库数据，直接进入主窗口";
+                    }
+                } else {
+                    // 查询失败，默认弹出填写对话框
+                    qDebug() << "查询知识库失败，打开填写对话框";
+                    KnowledgeDialog knowledgeDlg(_user, this);
+                    knowledgeDlg.exec();
+                }
+            } else {
+                // 响应解析失败，默认弹出填写对话框
+                qDebug() << "知识库响应解析失败，打开填写对话框";
+                KnowledgeDialog knowledgeDlg(_user, this);
+                knowledgeDlg.exec();
+            }
+        } else {
+            // 查询超时，默认弹出填写对话框
+            qDebug() << "查询知识库超时，打开填写对话框";
+            KnowledgeDialog knowledgeDlg(_user, this);
+            knowledgeDlg.exec();
+        }
+
+        // 登录成功，对话框即将关闭，不需要重新连接信号
         accept();
     } else if (reply == "no") {
         ui->message_label->setText(tr("    用户名或密码错误"));
