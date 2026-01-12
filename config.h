@@ -11,6 +11,8 @@
 #define RegisterType "RegisterType"
 #define SaveKnowledgeType "SaveKnowledgeType"      // 保存知识库
 #define GetKnowledgeType "GetKnowledgeType"        // 获取知识库
+#define AIChatType "AIChatType"                    // AI对话请求
+#define GetAIChatHistoryType "GetAIChatHistoryType" // 获取AI对话历史
 
 // 注册错误码
 enum RegisterErrorCode {

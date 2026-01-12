@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "config.h"
+#include "aichatmanager.h"
 
 #include <QDebug>
 #include <QThread>
@@ -74,6 +75,12 @@ void MainWindow::SlotReadFromClient()
     }
     else if (type == GetKnowledgeType) {
         handleGetKnowledgeRequest(jsonobj, tmpsocket);
+    }
+    else if (type == AIChatType) {
+        handleAIChatRequest(jsonobj, tmpsocket);
+    }
+    else if (type == GetAIChatHistoryType) {
+        handleGetAIChatHistoryRequest(jsonobj, tmpsocket);
     }
     else {
         qDebug() << "未知的请求类型:" << type;
@@ -413,4 +420,108 @@ void MainWindow::sendKnowledgeResponse(QTcpSocket *socket, const QString &status
 
     // 不要关闭连接，让客户端保持连接以便后续通信
     // 客户端收到响应后会自动关闭对话框
+}
+
+// ========== AI对话相关 ==========
+
+void MainWindow::handleAIChatRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+    QString message = json["message"].toString();
+    QString sessionId = json["session_id"].toString();  // 可选，空则新建会话
+
+    qDebug() << "=== handleAIChatRequest 开始 ===";
+    qDebug() << "用户:" << username;
+    qDebug() << "消息:" << message.left(100);
+    qDebug() << "会话ID:" << (sessionId.isEmpty() ? "(新建)" : sessionId);
+
+    // 验证用户存在
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        sendAIChatResponse(socket, "error", "用户不存在");
+        return;
+    }
+
+    // 调用AI聊天管理器（同步版本，简化实现）
+    AIChatResponse response = AIChatManager::getInstance().sendChatRequestSync(username, message, sessionId);
+
+    if (response.success) {
+        qDebug() << "AI响应成功，内容:" << response.content.left(100);
+        sendAIChatResponse(socket, "success", "OK", response.content, response.sessionId);
+    } else {
+        qDebug() << "AI响应失败:" << response.error;
+        sendAIChatResponse(socket, "error", response.error, "", response.sessionId);
+    }
+
+    qDebug() << "=== handleAIChatRequest 结束 ===";
+}
+
+void MainWindow::handleGetAIChatHistoryRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+    QString sessionId = json["session_id"].toString();  // 可选，空则获取所有会话
+    int limit = json["limit"].toInt(50);  // 默认50条
+
+    qDebug() << "收到获取AI对话历史请求 - 用户名:" << username << "会话ID:" << sessionId;
+
+    // 获取用户信息
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        sendAIChatResponse(socket, "error", "用户不存在");
+        return;
+    }
+
+    // 获取对话历史
+    QList<QJsonObject> history = DatabaseManager::getInstance().getAIChatHistory(user.user_id, sessionId, limit);
+
+    // 构建响应
+    QJsonObject responseJson;
+    responseJson["type"] = "AIChatHistoryResponse";
+    responseJson["status"] = "success";
+    responseJson["message"] = "获取成功";
+
+    QJsonArray historyArray;
+    for (const QJsonObject &msg : history) {
+        historyArray.append(msg);
+    }
+    responseJson["history"] = historyArray;
+
+    // 获取最后一次会话ID
+    QString lastSessionId = DatabaseManager::getInstance().getLastSessionId(user.user_id);
+    responseJson["last_session_id"] = lastSessionId;
+
+    QJsonDocument doc(responseJson);
+    QByteArray data = doc.toJson();
+
+    socket->write(data);
+    socket->flush();
+
+    qDebug() << "获取AI对话历史成功，共" << history.size() << "条记录";
+}
+
+void MainWindow::sendAIChatResponse(QTcpSocket *socket, const QString &status,
+                                    const QString &message, const QString &content,
+                                    const QString &sessionId)
+{
+    qDebug() << "=== sendAIChatResponse 开始 ===";
+    qDebug() << "socket状态:" << socket->state();
+
+    QJsonObject json;
+    json["type"] = "AIChatResponse";
+    json["status"] = status;
+    json["message"] = message;
+    json["content"] = content;
+    json["session_id"] = sessionId;
+
+    QJsonDocument doc(json);
+    QByteArray data = doc.toJson();
+
+    qDebug() << "AI响应数据长度:" << data.length();
+
+    qint64 bytesWritten = socket->write(data);
+    socket->flush();
+
+    qDebug() << "已发送AI响应:" << bytesWritten << "字节, status:" << status;
 }

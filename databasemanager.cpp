@@ -116,6 +116,28 @@ bool DatabaseManager::createTables()
         return false;
     }
 
+    // 创建AI对话历史表
+    QString createAIChatTable = R"(
+        CREATE TABLE IF NOT EXISTS ai_chats (
+            chat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            session_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+    )";
+
+    if (!query.exec(createAIChatTable)) {
+        qDebug() << "创建AI对话表失败: " << query.lastError().text();
+        return false;
+    }
+
+    // 为session_id创建索引以提高查询性能
+    query.exec("CREATE INDEX IF NOT EXISTS idx_ai_chats_session ON ai_chats(session_id)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_ai_chats_user ON ai_chats(user_id)");
+
     // 设置忙碌超时时间（毫秒）- 在 WAL 之前设置
     if (!query.exec("PRAGMA busy_timeout=5000")) {
         qDebug() << "设置 busy_timeout 失败: " << query.lastError().text();
@@ -381,4 +403,76 @@ bool DatabaseManager::clearUserKnowledge(int user_id)
 
     qDebug() << "用户知识点已清空 - 用户ID:" << user_id;
     return true;
+}
+
+// ========== AI对话操作 ==========
+
+QString DatabaseManager::generateSessionId()
+{
+    // 生成基于时间戳的会话ID
+    return QString::number(QDateTime::currentMSecsSinceEpoch());
+}
+
+QString DatabaseManager::getLastSessionId(int user_id)
+{
+    QSqlQuery query(_db);
+    query.prepare("SELECT session_id FROM ai_chats WHERE user_id = :user_id ORDER BY created_at DESC LIMIT 1");
+    query.bindValue(":user_id", user_id);
+
+    if (query.exec() && query.next()) {
+        return query.value(0).toString();
+    }
+    return "";  // 没有历史会话
+}
+
+bool DatabaseManager::saveAIChatMessage(int user_id, const QString &role, const QString &content, const QString &session_id)
+{
+    QSqlQuery query(_db);
+    query.prepare("INSERT INTO ai_chats (user_id, role, content, session_id) "
+                  "VALUES (:user_id, :role, :content, :session_id)");
+    query.bindValue(":user_id", user_id);
+    query.bindValue(":role", role);
+    query.bindValue(":content", content);
+    query.bindValue(":session_id", session_id);
+
+    if (!query.exec()) {
+        qDebug() << "保存AI对话失败: " << query.lastError().text();
+        return false;
+    }
+
+    return true;
+}
+
+QList<QJsonObject> DatabaseManager::getAIChatHistory(int user_id, const QString &session_id, int limit)
+{
+    QList<QJsonObject> history;
+    QSqlQuery query(_db);
+
+    QString sql = "SELECT role, content, session_id, created_at FROM ai_chats "
+                  "WHERE user_id = :user_id";
+    if (!session_id.isEmpty()) {
+        sql += " AND session_id = :session_id";
+    }
+    sql += " ORDER BY created_at ASC LIMIT :limit";
+
+    query.prepare(sql);
+    query.bindValue(":user_id", user_id);
+    if (!session_id.isEmpty()) {
+        query.bindValue(":session_id", session_id);
+    }
+    query.bindValue(":limit", limit);
+
+    if (query.exec()) {
+        while (query.next()) {
+            QJsonObject msg;
+            msg["role"] = query.value(0).toString();
+            msg["content"] = query.value(1).toString();
+            msg["session_id"] = query.value(2).toString();
+            history.append(msg);
+        }
+    } else {
+        qDebug() << "获取AI对话历史失败: " << query.lastError().text();
+    }
+
+    return history;
 }

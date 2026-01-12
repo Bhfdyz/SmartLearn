@@ -3,6 +3,8 @@
 
 #include <QSqlDatabase>
 #include <QStringList>
+#include <QJsonObject>
+#include <QList>
 #include "user.h"
 
 class DatabaseManager
@@ -37,6 +39,12 @@ public:
     // ========== 日志操作 ==========
     bool logUserAction(int user_id, const QString &action_type,
                       const QString &ip, const QString &details = ""); // 记录用户操作日志
+
+    // ========== AI对话操作 ==========
+    bool saveAIChatMessage(int user_id, const QString &role, const QString &content, const QString &session_id);
+    QList<QJsonObject> getAIChatHistory(int user_id, const QString &session_id = "", int limit = 50);
+    QString getLastSessionId(int user_id);  // 获取用户的最后一次会话ID
+    QString generateSessionId();  // 生成新的会话ID
 
 private:
     DatabaseManager();

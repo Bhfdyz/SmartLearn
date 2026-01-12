@@ -51,6 +51,12 @@ private:
                                const QString &message, const QStringList &knowledgeList = QStringList(),
                                const QString &learningGoal = "");  // 发送知识库响应
 
+    // ========== AI对话相关 ==========
+    void handleAIChatRequest(const QJsonObject &json, QTcpSocket *socket);  // 处理AI对话请求
+    void handleGetAIChatHistoryRequest(const QJsonObject &json, QTcpSocket *socket);  // 获取对话历史
+    void sendAIChatResponse(QTcpSocket *socket, const QString &status, const QString &message,
+                            const QString &content = "", const QString &sessionId = "");  // 发送AI响应
+
     // ========== 验证方法 ==========
     bool validateUsername(const QString &username);
     bool validatePassword(const QString &password);
