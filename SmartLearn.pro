@@ -9,6 +9,7 @@ CONFIG += c++17
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    aichatpage.cpp \
     connectmanager.cpp \
     knowledgedialog.cpp \
     logindialog.cpp \
@@ -17,6 +18,7 @@ SOURCES += \
     registerdialog.cpp
 
 HEADERS += \
+    aichatpage.h \
     config.h \
     connectmanager.h \
     knowledgedialog.h \

@@ -3,6 +3,7 @@
 #include "knowledgedialog.h"
 #include "connectmanager.h"
 #include "config.h"
+#include "aichatpage.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -352,23 +353,7 @@ void MainWindow::createKnowledgePage()
 
 void MainWindow::createAIChatPage()
 {
-    _aiChatPage = new QWidget();
-    _aiChatPage->setStyleSheet("background-color: white; border-radius: 10px;");
-
-    QVBoxLayout *layout = new QVBoxLayout(_aiChatPage);
-    layout->setContentsMargins(30, 30, 30, 30);
-
-    QLabel *title = new QLabel("AI 学习助手", _aiChatPage);
-    title->setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;");
-    layout->addWidget(title);
-
-    QLabel *content = new QLabel("AI对话功能开发中...\n\n敬请期待！", _aiChatPage);
-    content->setStyleSheet("color: #7f8c8d; font-size: 16px;");
-    content->setAlignment(Qt::AlignCenter);
-    layout->addWidget(content);
-
-    layout->addStretch();
-
+    _aiChatPage = new AIChatPage(_username, this);
     _stackedWidget->addWidget(_aiChatPage);
 }
 

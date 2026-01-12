@@ -188,7 +188,7 @@ void RegisterDialog::setupUI()
     QLabel *passwordLabel = new QLabel("* 密  码:", this);
     _password_edit = new QLineEdit(this);
     _password_edit->setEchoMode(QLineEdit::Password);
-    _password_edit->setPlaceholderText("至少8位，包含字母和数字");
+    _password_edit->setPlaceholderText("至少6位");
     _password_strength_label = new QLabel("", this);
     formLayout->addWidget(passwordLabel, 3, 0);
     formLayout->addWidget(_password_edit, 4, 0);
@@ -292,21 +292,12 @@ bool RegisterDialog::validatePassword(const QString &password)
         return false;
     }
 
-    // 长度检查
-    if (password.length() < 8) {
+    // 只检查长度，至少6位
+    if (password.length() < 6) {
         return false;
     }
 
-    // 复杂度检查：必须包含字母和数字
-    bool hasLetter = false;
-    bool hasDigit = false;
-
-    for (const QChar &ch : password) {
-        if (ch.isLetter()) hasLetter = true;
-        if (ch.isDigit()) hasDigit = true;
-    }
-
-    return hasLetter && hasDigit;
+    return true;
 }
 
 bool RegisterDialog::validateEmail(const QString &email)
@@ -336,7 +327,7 @@ bool RegisterDialog::validateInput()
 
     // 验证密码
     if (!validatePassword(_password_edit->text())) {
-        QMessageBox::warning(this, "输入错误", "密码强度不足（至少8位，包含字母和数字）");
+        QMessageBox::warning(this, "输入错误", "密码长度不足（至少6位）");
         _password_edit->setFocus();
         return false;
     }
@@ -512,24 +503,37 @@ void RegisterDialog::onConfirmRegister()
 void RegisterDialog::SlotReadFromServer()
 {
     QByteArray data = _client->readAll();
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    QJsonObject json = doc.object();
+    qDebug() << "=== RegisterDialog收到响应 ===";
+    qDebug() << "原始数据:" << data;
 
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (doc.isNull() || !doc.isObject()) {
+        qDebug() << "JSON解析失败，忽略";
+        return;
+    }
+
+    QJsonObject json = doc.object();
     QString type = json["type"].toString();
+    qDebug() << "响应类型:" << type;
+
     if (type != "RegisterResponse") {
+        qDebug() << "不是RegisterResponse，忽略";
         return;  // 不是注册响应，忽略
     }
 
     QString status = json["status"].toString();
     QString message = json["message"].toString();
+    qDebug() << "状态:" << status << "消息:" << message;
+
+    // 恢复按钮状态
+    _confirm_btn->setEnabled(true);
+    _confirm_btn->setText("确认注册");
 
     if (status == "success") {
         QMessageBox::information(this, "注册成功", message);
         accept();  // 关闭对话框，返回登录界面
     } else {
         QMessageBox::warning(this, "注册失败", message);
-        _confirm_btn->setEnabled(true);  // 重新启用按钮
-        _confirm_btn->setText("确认注册");
     }
 }
 
