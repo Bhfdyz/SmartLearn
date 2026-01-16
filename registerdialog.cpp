@@ -25,7 +25,7 @@ RegisterDialog::RegisterDialog(QWidget *parent)
 
     // 设置窗口属性
     setWindowTitle("注册新账号");
-    setFixedSize(550, 650);
+    setFixedSize(550, 800);
 
     // 设置UI布局
     setupUI();
@@ -219,8 +219,8 @@ void RegisterDialog::setupUI()
     // 年级（可选）
     QLabel *gradeLabel = new QLabel("  年  级:", this);
     _grade_combo = new QComboBox(this);
-    _grade_combo->addItem("请选择");
-    for (int year = 2025; year >= 2020; year--) {
+    QDate yeardate = QDate::currentDate();
+    for (int year = yeardate.year(); year >= yeardate.year() - 5; year--) {
         _grade_combo->addItem(QString::number(year));
     }
     formLayout->addWidget(gradeLabel, 12, 0);
