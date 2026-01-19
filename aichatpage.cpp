@@ -264,6 +264,7 @@ void AIChatPage::addMessageToUI(const ChatMessage &msg)
     QLabel *contentLabel = new QLabel(msg.content, widget);
     contentLabel->setObjectName("contentLabel");
     // contentLabel->setMaximumWidth(_chatListWidget->width() - 50);  // 注释：导致首次加载时文字显示异常（width()返回默认值约100）
+    contentLabel->setMinimumWidth(700);
     contentLabel->setWordWrap(true);
     contentLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     contentLabel->setStyleSheet(R"(

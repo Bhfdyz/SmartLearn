@@ -24,6 +24,11 @@
 #define UpdatePathProgressType "UpdatePathProgressType"        // 更新路径进度（阶段级别）
 #define UpdateStepProgressType "UpdateStepProgressType"        // 更新步骤进度（步骤级别）
 
+// 学习资源相关协议类型
+#define GenerateResourcesType "GenerateResourcesType"          // AI生成资源推荐
+#define GetResourcesType "GetResourcesType"                    // 获取资源列表
+#define AddResourceType "AddResourceType"                      // 手动添加资源
+
 // 注册错误码
 enum RegisterErrorCode {
     REGISTER_SUCCESS = 0,        // 注册成功

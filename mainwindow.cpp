@@ -5,6 +5,7 @@
 #include "config.h"
 #include "aichatpage.h"
 #include "learningpathpage.h"
+#include "resourcepage.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -106,7 +107,7 @@ void MainWindow::setupUI()
     _menuList->addItem("🤖 AI学习助手");
     _menuList->addItem("🗺️ 学习路径");
     _menuList->addItem("📖 学习资源");
-    _menuList->addItem("⚙️ 设置");
+//    _menuList->addItem("⚙️ 设置");
 
     sidebarLayout->addWidget(_menuList);
 
@@ -366,23 +367,7 @@ void MainWindow::createPathPage()
 
 void MainWindow::createResourcePage()
 {
-    _resourcePage = new QWidget();
-    _resourcePage->setStyleSheet("background-color: white; border-radius: 10px;");
-
-    QVBoxLayout *layout = new QVBoxLayout(_resourcePage);
-    layout->setContentsMargins(30, 30, 30, 30);
-
-    QLabel *title = new QLabel("学习资源推荐", _resourcePage);
-    title->setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;");
-    layout->addWidget(title);
-
-    QLabel *content = new QLabel("学习资源推荐功能开发中...\n\n敬请期待！", _resourcePage);
-    content->setStyleSheet("color: #7f8c8d; font-size: 16px;");
-    content->setAlignment(Qt::AlignCenter);
-    layout->addWidget(content);
-
-    layout->addStretch();
-
+    _resourcePage = new ResourcePage(_username, this);
     _stackedWidget->addWidget(_resourcePage);
 }
 

@@ -16,6 +16,7 @@
 #include <QRegularExpression>
 #include <QGroupBox>
 #include <QAbstractSocket>
+#include <QDate>
 
 RegisterDialog::RegisterDialog(QWidget *parent)
     : QDialog(parent)

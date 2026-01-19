@@ -17,6 +17,8 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     registerdialog.cpp \
+    resourcepage.cpp \
+    resourceitem.cpp \
     stageitem.cpp
 
 HEADERS += \
@@ -28,6 +30,8 @@ HEADERS += \
     logindialog.h \
     mainwindow.h \
     registerdialog.h \
+    resourcepage.h \
+    resourceitem.h \
     stageitem.h
 
 FORMS += \
