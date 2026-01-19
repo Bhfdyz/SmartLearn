@@ -3,6 +3,7 @@
 #include "config.h"
 #include "aichatmanager.h"
 #include "learningpathmanager.h"
+#include "resourcemanager.h"
 
 #include <QDebug>
 #include <QThread>
@@ -106,6 +107,12 @@ void MainWindow::SlotReadFromClient()
     }
     else if (type == UpdateStepProgressType) {
         handleUpdateStepProgressRequest(jsonobj, tmpsocket);
+    }
+    else if (type == GenerateResourcesType) {
+        handleGenerateResourcesRequest(jsonobj, tmpsocket);
+    }
+    else if (type == GetResourcesType) {
+        handleGetResourcesRequest(jsonobj, tmpsocket);
     }
     else {
         qDebug() << "未知的请求类型:" << type;
@@ -1006,4 +1013,132 @@ void MainWindow::sendPathResponse(QTcpSocket *socket, const QString &status,
     socket->flush();
 
     qDebug() << "已发送路径响应:" << bytesWritten << "字节, status:" << status;
+}
+
+// ========== 学习资源相关 ==========
+
+void MainWindow::handleGenerateResourcesRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    qDebug() << "=== 收到生成资源推荐请求 ===";
+
+    int path_id = json["path_id"].toInt();
+    QString path_name = json["path_name"].toString();
+    QJsonArray stages = json["stages"].toArray();
+
+    qDebug() << "路径ID:" << path_id;
+    qDebug() << "路径名称:" << path_name;
+    qDebug() << "阶段数量:" << stages.size();
+
+    // 如果stages为空，从数据库获取路径详情
+    if (stages.isEmpty() && path_id > 0) {
+        qDebug() << "stages为空，从数据库获取路径详情";
+        QSqlQuery query(_db);
+        query.prepare("SELECT path_name, path_data FROM learning_paths WHERE path_id = :path_id");
+        query.bindValue(":path_id", path_id);
+
+        if (query.exec() && query.next()) {
+            path_name = query.value(0).toString();
+            QString pathDataStr = query.value(1).toString();
+
+            QJsonDocument pathDoc = QJsonDocument::fromJson(pathDataStr.toUtf8());
+            if (!pathDoc.isNull() && pathDoc.isObject()) {
+                QJsonObject pathObj = pathDoc.object();
+                stages = pathObj["stages"].toArray();
+                qDebug() << "从数据库获取到阶段数量:" << stages.size();
+            }
+        }
+    }
+
+    if (path_id <= 0 || stages.isEmpty()) {
+        sendResourcesResponse(socket, "error", "参数错误：路径ID或阶段数据为空，请确认学习路径已正确生成");
+        return;
+    }
+
+    // 调用ResourceManager生成资源推荐
+    ResourceGenerationResponse response = ResourceManager::getInstance().generateAndSaveResources(
+        path_id, path_name, stages
+    );
+
+    QJsonArray resourcesArray;
+    for (const ResourceInfo &info : response.resources) {
+        QJsonObject resourceObj;
+        resourceObj["id"] = info.id;
+        resourceObj["path_id"] = info.path_id;
+        resourceObj["stage_order"] = info.stage_order;
+        resourceObj["title"] = info.title;
+        resourceObj["url"] = info.url;
+        resourceObj["source"] = info.source;
+        resourceObj["description"] = info.description;
+        resourceObj["difficulty"] = info.difficulty;
+        resourcesArray.append(resourceObj);
+    }
+
+    sendResourcesResponse(socket,
+                          response.success ? "success" : "error",
+                          response.message,
+                          resourcesArray);
+}
+
+void MainWindow::handleGetResourcesRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    qDebug() << "=== 收到获取资源列表请求 ===";
+
+    int path_id = json["path_id"].toInt();
+    int stage_order = json["stage_order"].toInt(-1);  // 可选，-1表示获取全部
+
+    qDebug() << "路径ID:" << path_id;
+    qDebug() << "阶段序号:" << (stage_order >= 0 ? QString::number(stage_order) : "全部");
+
+    if (path_id <= 0) {
+        sendResourcesResponse(socket, "error", "参数错误：路径ID无效");
+        return;
+    }
+
+    QList<ResourceInfo> resources;
+    if (stage_order >= 0) {
+        resources = ResourceManager::getInstance().getStageResources(path_id, stage_order);
+    } else {
+        resources = ResourceManager::getInstance().getPathResources(path_id);
+    }
+
+    QJsonArray resourcesArray;
+    for (const ResourceInfo &info : resources) {
+        QJsonObject resourceObj;
+        resourceObj["id"] = info.id;
+        resourceObj["path_id"] = info.path_id;
+        resourceObj["stage_order"] = info.stage_order;
+        resourceObj["title"] = info.title;
+        resourceObj["url"] = info.url;
+        resourceObj["source"] = info.source;
+        resourceObj["description"] = info.description;
+        resourceObj["difficulty"] = info.difficulty;
+        resourcesArray.append(resourceObj);
+    }
+
+    sendResourcesResponse(socket, "success", QString("获取到%1条资源").arg(resources.size()), resourcesArray);
+}
+
+void MainWindow::sendResourcesResponse(QTcpSocket *socket, const QString &status,
+                                       const QString &message, const QJsonArray &resources)
+{
+    qDebug() << "=== sendResourcesResponse 开始 ===";
+
+    QJsonObject json;
+    json["type"] = "ResourcesResponse";
+    json["status"] = status;
+    json["message"] = message;
+
+    if (!resources.isEmpty()) {
+        json["resources"] = resources;
+    }
+
+    QJsonDocument doc(json);
+    QByteArray responseData = doc.toJson();
+
+    qDebug() << "资源响应数据长度:" << responseData.length();
+
+    qint64 bytesWritten = socket->write(responseData);
+    socket->flush();
+
+    qDebug() << "已发送资源响应:" << bytesWritten << "字节, status:" << status;
 }

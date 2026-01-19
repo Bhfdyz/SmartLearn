@@ -183,6 +183,31 @@ bool DatabaseManager::createTables()
     // 为阶段进度表创建索引
     query.exec("CREATE INDEX IF NOT EXISTS idx_stage_progress_path ON path_stage_progress(path_id)");
 
+    // 创建学习资源推荐表
+    QString createResourcesTable = R"(
+        CREATE TABLE IF NOT EXISTS learning_resources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_id INTEGER NOT NULL,
+            stage_order INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            source TEXT,
+            description TEXT,
+            difficulty INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (path_id) REFERENCES learning_paths(path_id) ON DELETE CASCADE
+        )
+    )";
+
+    if (!query.exec(createResourcesTable)) {
+        qDebug() << "创建学习资源表失败: " << query.lastError().text();
+        return false;
+    }
+
+    // 为资源表创建索引
+    query.exec("CREATE INDEX IF NOT EXISTS idx_resources_path_stage ON learning_resources(path_id, stage_order)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_resources_path ON learning_resources(path_id)");
+
     // 设置忙碌超时时间（毫秒）- 在 WAL 之前设置
     if (!query.exec("PRAGMA busy_timeout=5000")) {
         qDebug() << "设置 busy_timeout 失败: " << query.lastError().text();
@@ -605,4 +630,104 @@ QString DatabaseManager::getSessionTitle(int user_id, const QString &session_id)
     }
 
     return "";  // 没有用户消息
+}
+
+// ========== 学习资源操作 ==========
+
+bool DatabaseManager::addResource(int path_id, int stage_order, const QString &title,
+                                  const QString &url, const QString &source,
+                                  const QString &description, int difficulty)
+{
+    QSqlQuery query(_db);
+    query.prepare("INSERT INTO learning_resources (path_id, stage_order, title, url, source, description, difficulty) "
+                  "VALUES (:path_id, :stage_order, :title, :url, :source, :description, :difficulty)");
+    query.bindValue(":path_id", path_id);
+    query.bindValue(":stage_order", stage_order);
+    query.bindValue(":title", title);
+    query.bindValue(":url", url);
+    query.bindValue(":source", source.isEmpty() ? QVariant() : source);
+    query.bindValue(":description", description.isEmpty() ? QVariant() : description);
+    query.bindValue(":difficulty", difficulty);
+
+    if (!query.exec()) {
+        qDebug() << "添加学习资源失败: " << query.lastError().text();
+        return false;
+    }
+
+    qDebug() << "学习资源已添加 - path_id:" << path_id << "stage:" << stage_order << "title:" << title;
+    return true;
+}
+
+QList<ResourceInfo> DatabaseManager::getPathResources(int path_id)
+{
+    QList<ResourceInfo> resources;
+    QSqlQuery query(_db);
+    query.prepare("SELECT id, path_id, stage_order, title, url, source, description, difficulty, created_at "
+                  "FROM learning_resources WHERE path_id = :path_id ORDER BY stage_order, id");
+    query.bindValue(":path_id", path_id);
+
+    if (query.exec()) {
+        while (query.next()) {
+            ResourceInfo info;
+            info.id = query.value(0).toInt();
+            info.path_id = query.value(1).toInt();
+            info.stage_order = query.value(2).toInt();
+            info.title = query.value(3).toString();
+            info.url = query.value(4).toString();
+            info.source = query.value(5).toString();
+            info.description = query.value(6).toString();
+            info.difficulty = query.value(7).toInt();
+            info.created_at = query.value(8).toString();
+            resources.append(info);
+        }
+    } else {
+        qDebug() << "获取学习资源失败: " << query.lastError().text();
+    }
+
+    return resources;
+}
+
+QList<ResourceInfo> DatabaseManager::getStageResources(int path_id, int stage_order)
+{
+    QList<ResourceInfo> resources;
+    QSqlQuery query(_db);
+    query.prepare("SELECT id, path_id, stage_order, title, url, source, description, difficulty, created_at "
+                  "FROM learning_resources WHERE path_id = :path_id AND stage_order = :stage_order ORDER BY id");
+    query.bindValue(":path_id", path_id);
+    query.bindValue(":stage_order", stage_order);
+
+    if (query.exec()) {
+        while (query.next()) {
+            ResourceInfo info;
+            info.id = query.value(0).toInt();
+            info.path_id = query.value(1).toInt();
+            info.stage_order = query.value(2).toInt();
+            info.title = query.value(3).toString();
+            info.url = query.value(4).toString();
+            info.source = query.value(5).toString();
+            info.description = query.value(6).toString();
+            info.difficulty = query.value(7).toInt();
+            info.created_at = query.value(8).toString();
+            resources.append(info);
+        }
+    } else {
+        qDebug() << "获取阶段学习资源失败: " << query.lastError().text();
+    }
+
+    return resources;
+}
+
+bool DatabaseManager::clearPathResources(int path_id)
+{
+    QSqlQuery query(_db);
+    query.prepare("DELETE FROM learning_resources WHERE path_id = :path_id");
+    query.bindValue(":path_id", path_id);
+
+    if (!query.exec()) {
+        qDebug() << "清空学习资源失败: " << query.lastError().text();
+        return false;
+    }
+
+    qDebug() << "路径学习资源已清空 - path_id:" << path_id;
+    return true;
 }

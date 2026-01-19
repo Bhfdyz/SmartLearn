@@ -13,7 +13,8 @@ SOURCES += \
     databasemanager.cpp \
     learningpathmanager.cpp \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    resourcemanager.cpp
 
 HEADERS += \
     aichatmanager.h \
@@ -21,6 +22,7 @@ HEADERS += \
     databasemanager.h \
     learningpathmanager.h \
     mainwindow.h \
+    resourcemanager.h \
     user.h
 
 FORMS += \

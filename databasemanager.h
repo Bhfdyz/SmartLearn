@@ -4,8 +4,22 @@
 #include <QSqlDatabase>
 #include <QStringList>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QList>
 #include "user.h"
+
+// 学习资源信息结构
+struct ResourceInfo {
+    int         id;
+    int         path_id;
+    int         stage_order;
+    QString     title;
+    QString     url;
+    QString     source;
+    QString     description;
+    int         difficulty;
+    QString     created_at;
+};
 
 class DatabaseManager
 {
@@ -48,6 +62,13 @@ public:
     QList<QJsonObject> getSessionList(int user_id);  // 获取用户所有会话列表
     bool deleteSession(int user_id, const QString &session_id);  // 删除指定会话
     QString getSessionTitle(int user_id, const QString &session_id);  // 获取会话标题
+
+    // ========== 学习资源操作 ==========
+    bool addResource(int path_id, int stage_order, const QString &title, const QString &url,
+                     const QString &source, const QString &description, int difficulty = 1);
+    QList<ResourceInfo> getPathResources(int path_id);  // 获取路径的所有资源
+    QList<ResourceInfo> getStageResources(int path_id, int stage_order);  // 获取特定阶段的资源
+    bool clearPathResources(int path_id);  // 清空路径的所有资源
 
 private:
     DatabaseManager();

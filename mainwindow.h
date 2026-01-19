@@ -69,6 +69,12 @@ private:
     void sendPathResponse(QTcpSocket *socket, const QString &status, const QString &message,
                           const QJsonObject &data = QJsonObject());  // 发送路径响应
 
+    // ========== 学习资源相关 ==========
+    void handleGenerateResourcesRequest(const QJsonObject &json, QTcpSocket *socket);  // AI生成资源推荐
+    void handleGetResourcesRequest(const QJsonObject &json, QTcpSocket *socket);  // 获取资源列表
+    void sendResourcesResponse(QTcpSocket *socket, const QString &status, const QString &message,
+                               const QJsonArray &resources = QJsonArray());  // 发送资源响应
+
     // ========== 验证方法 ==========
     bool validateUsername(const QString &username);
     bool validatePassword(const QString &password);
