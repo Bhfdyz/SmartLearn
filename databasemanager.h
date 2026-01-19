@@ -45,6 +45,9 @@ public:
     QList<QJsonObject> getAIChatHistory(int user_id, const QString &session_id = "", int limit = 50);
     QString getLastSessionId(int user_id);  // 获取用户的最后一次会话ID
     QString generateSessionId();  // 生成新的会话ID
+    QList<QJsonObject> getSessionList(int user_id);  // 获取用户所有会话列表
+    bool deleteSession(int user_id, const QString &session_id);  // 删除指定会话
+    QString getSessionTitle(int user_id, const QString &session_id);  // 获取会话标题
 
 private:
     DatabaseManager();

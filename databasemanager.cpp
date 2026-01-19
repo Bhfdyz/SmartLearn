@@ -138,6 +138,51 @@ bool DatabaseManager::createTables()
     query.exec("CREATE INDEX IF NOT EXISTS idx_ai_chats_session ON ai_chats(session_id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_ai_chats_user ON ai_chats(user_id)");
 
+    // 创建学习路径表
+    QString createLearningPathTable = R"(
+        CREATE TABLE IF NOT EXISTS learning_paths (
+            path_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            path_name TEXT NOT NULL,
+            learning_goal TEXT NOT NULL,
+            path_data TEXT NOT NULL,
+            status INTEGER DEFAULT 0,
+            progress REAL DEFAULT 0.0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+    )";
+
+    if (!query.exec(createLearningPathTable)) {
+        qDebug() << "创建学习路径表失败: " << query.lastError().text();
+        return false;
+    }
+
+    // 为学习路径表创建索引
+    query.exec("CREATE INDEX IF NOT EXISTS idx_learning_paths_user ON learning_paths(user_id)");
+
+    // 创建学习路径阶段进度表
+    QString createStageProgressTable = R"(
+        CREATE TABLE IF NOT EXISTS path_stage_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_id INTEGER NOT NULL,
+            stage_order INTEGER NOT NULL,
+            is_completed BOOLEAN DEFAULT 0,
+            completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (path_id) REFERENCES learning_paths(path_id) ON DELETE CASCADE,
+            UNIQUE(path_id, stage_order)
+        )
+    )";
+
+    if (!query.exec(createStageProgressTable)) {
+        qDebug() << "创建阶段进度表失败: " << query.lastError().text();
+        return false;
+    }
+
+    // 为阶段进度表创建索引
+    query.exec("CREATE INDEX IF NOT EXISTS idx_stage_progress_path ON path_stage_progress(path_id)");
+
     // 设置忙碌超时时间（毫秒）- 在 WAL 之前设置
     if (!query.exec("PRAGMA busy_timeout=5000")) {
         qDebug() << "设置 busy_timeout 失败: " << query.lastError().text();
@@ -475,4 +520,89 @@ QList<QJsonObject> DatabaseManager::getAIChatHistory(int user_id, const QString 
     }
 
     return history;
+}
+
+QList<QJsonObject> DatabaseManager::getSessionList(int user_id)
+{
+    QList<QJsonObject> sessions;
+    QSqlQuery query(_db);
+
+    // 获取每个会话的信息：session_id, 第一条消息（作为标题）, 创建时间, 消息数量
+    QString sql = R"(
+        SELECT
+            session_id,
+            MIN(created_at) as created_at,
+            COUNT(*) as message_count
+        FROM ai_chats
+        WHERE user_id = :user_id
+        GROUP BY session_id
+        ORDER BY created_at DESC
+    )";
+
+    query.prepare(sql);
+    query.bindValue(":user_id", user_id);
+
+    if (query.exec()) {
+        while (query.next()) {
+            QString sessionId = query.value(0).toString();
+            QString createdAt = query.value(1).toString();
+            int messageCount = query.value(2).toInt();
+
+            QJsonObject session;
+            session["session_id"] = sessionId;
+            session["created_at"] = createdAt;
+            session["message_count"] = messageCount;
+
+            // 获取会话标题（第一条用户消息）
+            QString title = getSessionTitle(user_id, sessionId);
+            session["title"] = title.isEmpty() ? "新对话" : title;
+
+            sessions.append(session);
+        }
+    } else {
+        qDebug() << "获取会话列表失败: " << query.lastError().text();
+    }
+
+    return sessions;
+}
+
+bool DatabaseManager::deleteSession(int user_id, const QString &session_id)
+{
+    QSqlQuery query(_db);
+    query.prepare("DELETE FROM ai_chats WHERE user_id = :user_id AND session_id = :session_id");
+    query.bindValue(":user_id", user_id);
+    query.bindValue(":session_id", session_id);
+
+    if (!query.exec()) {
+        qDebug() << "删除会话失败: " << query.lastError().text();
+        return false;
+    }
+
+    qDebug() << "会话已删除 - user_id:" << user_id << "session_id:" << session_id
+             << "影响行数:" << query.numRowsAffected();
+    return true;
+}
+
+QString DatabaseManager::getSessionTitle(int user_id, const QString &session_id)
+{
+    QSqlQuery query(_db);
+    // 获取会话中第一条用户消息作为标题
+    query.prepare(R"(
+        SELECT content FROM ai_chats
+        WHERE user_id = :user_id AND session_id = :session_id AND role = 'user'
+        ORDER BY created_at ASC LIMIT 1
+    )");
+    query.bindValue(":user_id", user_id);
+    query.bindValue(":session_id", session_id);
+
+    if (query.exec() && query.next()) {
+        QString content = query.value(0).toString();
+        // 截取前30个字符作为标题
+        if (content.length() > 30) {
+            return content.left(30) + "...";
+        }
+        return content;
+    }
+
+    return "";  // 没有用户消息
 }

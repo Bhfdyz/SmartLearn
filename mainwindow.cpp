@@ -2,6 +2,7 @@
 #include "ui_mainwindow.h"
 #include "config.h"
 #include "aichatmanager.h"
+#include "learningpathmanager.h"
 
 #include <QDebug>
 #include <QThread>
@@ -81,6 +82,30 @@ void MainWindow::SlotReadFromClient()
     }
     else if (type == GetAIChatHistoryType) {
         handleGetAIChatHistoryRequest(jsonobj, tmpsocket);
+    }
+    else if (type == GetSessionListType) {
+        handleGetSessionListRequest(jsonobj, tmpsocket);
+    }
+    else if (type == DeleteSessionType) {
+        handleDeleteSessionRequest(jsonobj, tmpsocket);
+    }
+    else if (type == GenerateLearningPathType) {
+        handleGeneratePathRequest(jsonobj, tmpsocket);
+    }
+    else if (type == GetLearningPathListType) {
+        handleGetPathListRequest(jsonobj, tmpsocket);
+    }
+    else if (type == GetLearningPathDetailType) {
+        handleGetPathDetailRequest(jsonobj, tmpsocket);
+    }
+    else if (type == DeleteLearningPathType) {
+        handleDeletePathRequest(jsonobj, tmpsocket);
+    }
+    else if (type == UpdatePathProgressType) {
+        handleUpdatePathProgressRequest(jsonobj, tmpsocket);
+    }
+    else if (type == UpdateStepProgressType) {
+        handleUpdateStepProgressRequest(jsonobj, tmpsocket);
     }
     else {
         qDebug() << "未知的请求类型:" << type;
@@ -315,32 +340,58 @@ void MainWindow::handleSaveKnowledgeRequest(const QJsonObject &json, QTcpSocket 
         }
     }
 
-    // 追加新知识点（不删除已存在的）
+    // 差异化更新：获取数据库中现有的知识点
+    QSet<QString> dbPoints;
+    QSqlQuery selectQuery(db);
+    selectQuery.prepare("SELECT knowledge_point FROM user_knowledge WHERE user_id = :user_id");
+    selectQuery.bindValue(":user_id", user.user_id);
+    if (selectQuery.exec()) {
+        while (selectQuery.next()) {
+            dbPoints.insert(selectQuery.value(0).toString());
+        }
+        qDebug() << "数据库中现有知识点数:" << dbPoints.size();
+    } else {
+        qDebug() << "查询现有知识点失败:" << selectQuery.lastError().text();
+        hasError = true;
+    }
+
+    // 构建客户端发送的知识点集合
+    QSet<QString> clientPoints;
     for (const QJsonValue &value : knowledgeArray) {
-        QString point = value.toString();
+        QString point = value.toString().trimmed();
         if (!point.isEmpty()) {
-            QSqlQuery checkQuery(db);
-            checkQuery.prepare("SELECT COUNT(*) FROM user_knowledge WHERE user_id = :user_id AND knowledge_point = :point");
-            checkQuery.bindValue(":user_id", user.user_id);
-            checkQuery.bindValue(":point", point);
+            clientPoints.insert(point);
+        }
+    }
+    qDebug() << "客户端发送的知识点数:" << clientPoints.size();
 
-            if (checkQuery.exec() && checkQuery.next() && checkQuery.value(0).toInt() > 0) {
-                // 已存在，跳过
-                qDebug() << "知识点已存在，跳过:" << point;
-                continue;
-            }
+    // 删除数据库有但客户端没有的（被用户删除的）
+    QSet<QString> toDelete = dbPoints - clientPoints;
+    for (const QString &point : toDelete) {
+        QSqlQuery delQuery(db);
+        delQuery.prepare("DELETE FROM user_knowledge WHERE user_id = :user_id AND knowledge_point = :point");
+        delQuery.bindValue(":user_id", user.user_id);
+        delQuery.bindValue(":point", point);
+        if (!delQuery.exec()) {
+            qDebug() << "知识点删除失败:" << point << delQuery.lastError().text();
+            hasError = true;
+        } else {
+            qDebug() << "知识点已删除:" << point;
+        }
+    }
 
-            // 插入新知识点
-            QSqlQuery insertQuery(db);
-            insertQuery.prepare("INSERT INTO user_knowledge (user_id, knowledge_point) VALUES (:user_id, :point)");
-            insertQuery.bindValue(":user_id", user.user_id);
-            insertQuery.bindValue(":point", point);
-            if (!insertQuery.exec()) {
-                qDebug() << "知识点添加失败:" << point << insertQuery.lastError().text();
-                hasError = true;
-            } else {
-                qDebug() << "知识点已添加:" << point;
-            }
+    // 插入客户端有但数据库没有的（新增的）
+    QSet<QString> toInsert = clientPoints - dbPoints;
+    for (const QString &point : toInsert) {
+        QSqlQuery insQuery(db);
+        insQuery.prepare("INSERT INTO user_knowledge (user_id, knowledge_point) VALUES (:user_id, :point)");
+        insQuery.bindValue(":user_id", user.user_id);
+        insQuery.bindValue(":point", point);
+        if (!insQuery.exec()) {
+            qDebug() << "知识点添加失败:" << point << insQuery.lastError().text();
+            hasError = true;
+        } else {
+            qDebug() << "知识点已添加:" << point;
         }
     }
 
@@ -524,4 +575,435 @@ void MainWindow::sendAIChatResponse(QTcpSocket *socket, const QString &status,
     socket->flush();
 
     qDebug() << "已发送AI响应:" << bytesWritten << "字节, status:" << status;
+}
+
+// ========== 会话管理相关 ==========
+
+void MainWindow::handleGetSessionListRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+
+    qDebug() << "收到获取会话列表请求 - 用户名:" << username;
+
+    // 获取用户信息
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        QJsonObject responseJson;
+        responseJson["type"] = "SessionListResponse";
+        responseJson["status"] = "error";
+        responseJson["message"] = "用户不存在";
+        QJsonDocument doc(responseJson);
+        socket->write(doc.toJson());
+        socket->flush();
+        return;
+    }
+
+    // 获取会话列表
+    QList<QJsonObject> sessions = DatabaseManager::getInstance().getSessionList(user.user_id);
+
+    // 构建响应
+    QJsonObject responseJson;
+    responseJson["type"] = "SessionListResponse";
+    responseJson["status"] = "success";
+    responseJson["message"] = "获取成功";
+
+    QJsonArray sessionArray;
+    for (const QJsonObject &session : sessions) {
+        sessionArray.append(session);
+    }
+    responseJson["sessions"] = sessionArray;
+
+    QJsonDocument doc(responseJson);
+    QByteArray data = doc.toJson();
+
+    socket->write(data);
+    socket->flush();
+
+    qDebug() << "获取会话列表成功，共" << sessions.size() << "个会话";
+}
+
+void MainWindow::handleDeleteSessionRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+    QString sessionId = json["session_id"].toString();
+
+    qDebug() << "收到删除会话请求 - 用户名:" << username << "会话ID:" << sessionId;
+
+    // 获取用户信息
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        QJsonObject responseJson;
+        responseJson["type"] = "DeleteSessionResponse";
+        responseJson["status"] = "error";
+        responseJson["message"] = "用户不存在";
+        QJsonDocument doc(responseJson);
+        socket->write(doc.toJson());
+        socket->flush();
+        return;
+    }
+
+    // 删除会话
+    bool success = DatabaseManager::getInstance().deleteSession(user.user_id, sessionId);
+
+    // 构建响应
+    QJsonObject responseJson;
+    responseJson["type"] = "DeleteSessionResponse";
+    if (success) {
+        responseJson["status"] = "success";
+        responseJson["message"] = "会话已删除";
+        qDebug() << "删除会话成功";
+    } else {
+        responseJson["status"] = "error";
+        responseJson["message"] = "删除会话失败";
+        qDebug() << "删除会话失败";
+    }
+
+    QJsonDocument doc(responseJson);
+    socket->write(doc.toJson());
+    socket->flush();
+}
+
+// ========== 学习路径相关 ==========
+
+void MainWindow::handleGeneratePathRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+    QString path_name = json["path_name"].toString();
+    QString learning_goal = json["learning_goal"].toString();
+
+    QJsonArray knowledgeArray = json["current_knowledge"].toArray();
+    QStringList current_knowledge;
+    for (const QJsonValue &value : knowledgeArray) {
+        current_knowledge.append(value.toString());
+    }
+
+    QString time_preference = json.value("time_preference").toString("3个月");
+    QString difficulty = json.value("difficulty").toString("intermediate");
+
+    qDebug() << "=== handleGeneratePathRequest 开始 ===";
+    qDebug() << "用户:" << username;
+    qDebug() << "路径名称:" << path_name;
+    qDebug() << "学习目标:" << learning_goal;
+
+    // 获取用户信息
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        sendPathResponse(socket, "error", "用户不存在");
+        return;
+    }
+
+    // 调用LearningPathManager生成路径
+    GeneratePathResponse response = LearningPathManager::getInstance().generatePath(
+        user.user_id, path_name, learning_goal, current_knowledge, time_preference, difficulty
+    );
+
+    if (response.success) {
+        qDebug() << "学习路径生成成功，path_id:" << response.path_id;
+
+        // 构建响应
+        QJsonObject data;
+        data["path_id"] = response.path_id;
+        data["path_name"] = path_name;
+        data["learning_goal"] = learning_goal;
+        data["path_data"] = response.path_data;
+
+        sendPathResponse(socket, "success", "学习路径生成成功", data);
+    } else {
+        qDebug() << "学习路径生成失败:" << response.error;
+        sendPathResponse(socket, "error", response.error);
+    }
+}
+
+void MainWindow::handleGetPathListRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+
+    qDebug() << "收到获取路径列表请求 - 用户名:" << username;
+
+    // 获取用户信息
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        sendPathResponse(socket, "error", "用户不存在");
+        return;
+    }
+
+    // 获取路径列表
+    QList<LearningPath> paths = LearningPathManager::getInstance().getUserPaths(user.user_id);
+
+    // 构建响应
+    QJsonObject responseJson;
+    responseJson["type"] = "PathListResponse";
+    responseJson["status"] = "success";
+    responseJson["message"] = "获取成功";
+
+    QJsonArray pathArray;
+    for (const LearningPath &path : paths) {
+        QJsonObject pathObj;
+        pathObj["path_id"] = path.path_id;
+        pathObj["path_name"] = path.path_name;
+        pathObj["learning_goal"] = path.learning_goal;
+        pathObj["status"] = path.status;
+        pathObj["progress"] = path.progress;
+        pathObj["created_at"] = path.created_at;
+        pathArray.append(pathObj);
+    }
+    responseJson["paths"] = pathArray;
+
+    QJsonDocument doc(responseJson);
+    socket->write(doc.toJson());
+    socket->flush();
+
+    qDebug() << "获取路径列表成功，共" << paths.size() << "条路径";
+}
+
+void MainWindow::handleGetPathDetailRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+    int path_id = json["path_id"].toInt();
+
+    qDebug() << "收到获取路径详情请求 - 用户名:" << username << "path_id:" << path_id;
+
+    // 获取用户信息
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        sendPathResponse(socket, "error", "用户不存在");
+        return;
+    }
+
+    // 获取路径详情
+    LearningPath path = LearningPathManager::getInstance().getPathDetail(path_id, user.user_id);
+
+    if (path.path_id == 0) {
+        qDebug() << "路径不存在或无权访问";
+        sendPathResponse(socket, "error", "路径不存在或无权访问");
+        return;
+    }
+
+    // 解析path_data
+    QJsonDocument pathDoc = QJsonDocument::fromJson(path.path_data.toUtf8());
+    QJsonObject pathData = pathDoc.object();
+
+    // 验证path_data是否有效
+    if (pathData.isEmpty() || !pathData.contains("stages")) {
+        qDebug() << "错误: path_data为空或缺少stages字段 - path_id:" << path_id;
+        sendPathResponse(socket, "error", "路径数据不完整，请重新生成路径");
+        return;
+    }
+
+    QJsonArray stagesArray = pathData["stages"].toArray();
+    if (stagesArray.isEmpty()) {
+        qDebug() << "警告: path_data中stages数组为空 - path_id:" << path_id;
+    }
+
+    // 构建响应
+    QJsonObject responseJson;
+    responseJson["type"] = "PathDetailResponse";
+    responseJson["status"] = "success";
+    responseJson["message"] = "获取成功";
+    responseJson["path_id"] = path.path_id;
+    responseJson["path_name"] = path.path_name;
+    responseJson["learning_goal"] = path.learning_goal;
+    responseJson["path_status"] = path.status;  // 修复: 使用path_status避免覆盖status字段
+    responseJson["progress"] = path.progress;
+    responseJson["created_at"] = path.created_at;
+    responseJson["updated_at"] = path.updated_at;
+    responseJson["path_data"] = pathData;
+
+    QJsonDocument doc(responseJson);
+    socket->write(doc.toJson());
+    socket->flush();
+
+    qDebug() << "获取路径详情成功";
+}
+
+void MainWindow::handleDeletePathRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+    int path_id = json["path_id"].toInt();
+
+    qDebug() << "收到删除路径请求 - 用户名:" << username << "path_id:" << path_id;
+
+    // 获取用户信息
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        sendPathResponse(socket, "error", "用户不存在");
+        return;
+    }
+
+    // 删除路径
+    bool success = LearningPathManager::getInstance().deletePath(path_id, user.user_id);
+
+    // 构建响应
+    QJsonObject responseJson;
+    responseJson["type"] = "DeletePathResponse";
+    if (success) {
+        responseJson["status"] = "success";
+        responseJson["message"] = "路径已删除";
+        qDebug() << "删除路径成功";
+    } else {
+        responseJson["status"] = "error";
+        responseJson["message"] = "删除路径失败";
+        qDebug() << "删除路径失败";
+    }
+
+    QJsonDocument doc(responseJson);
+    socket->write(doc.toJson());
+    socket->flush();
+}
+
+void MainWindow::handleUpdatePathProgressRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+    int path_id = json["path_id"].toInt();
+    int stage_order = json["stage_order"].toInt();
+    bool completed = json["completed"].toBool();
+    int completed_count = json["completed_count"].toInt();
+    int total_count = json["total_count"].toInt();
+
+    qDebug() << "收到更新路径进度请求 - 用户名:" << username << "path_id:" << path_id << "stage_order:" << stage_order << "completed:" << completed;
+
+    // 获取用户信息
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        sendPathResponse(socket, "error", "用户不存在");
+        return;
+    }
+
+    // 设置阶段完成状态
+    bool success = LearningPathManager::getInstance().setStageCompleted(path_id, stage_order, completed);
+
+    double progress = 0.0;
+    int status = 0;
+    int completedSteps = 0;
+    int totalSteps = 0;
+
+    if (success) {
+        // 同步步骤状态到阶段完成状态（仅当阶段标记为完成时）
+        if (completed) {
+            LearningPathManager::getInstance().syncStepsToStageCompletion(path_id, stage_order, completed);
+        }
+
+        // 计算并更新路径进度（使用步骤计数而非阶段计数）
+        QPair<int, int> stepProgress = LearningPathManager::getInstance().calculateStepProgress(path_id);
+        completedSteps = stepProgress.first;
+        totalSteps = stepProgress.second;
+        progress = totalSteps > 0 ? (double)completedSteps / totalSteps : 0.0;
+
+        LearningPathManager::getInstance().updatePathProgress(path_id, user.user_id, progress);
+
+        // 根据进度更新状态
+        status = 0;  // 未开始
+        if (progress > 0) status = 1;  // 进行中
+        if (progress >= 1.0) status = 2;  // 已完成
+        LearningPathManager::getInstance().updatePathStatus(path_id, user.user_id, status);
+
+        qDebug() << "更新路径进度成功 - progress:" << progress
+                 << "completedSteps:" << completedSteps << "totalSteps:" << totalSteps
+                 << "status:" << status;
+    }
+
+    // 构建响应 - 包含更新后的进度和状态信息
+    QJsonObject responseJson;
+    responseJson["type"] = "UpdatePathProgressResponse";
+    responseJson["status"] = success ? "success" : "error";
+    responseJson["message"] = success ? "进度更新成功" : "进度更新失败";
+
+    if (success) {
+        // 添加更新后的进度信息，供客户端刷新UI使用
+        responseJson["progress"] = progress;
+        responseJson["path_status"] = status;
+        responseJson["completed_steps"] = completedSteps;
+        responseJson["total_steps"] = totalSteps;
+    }
+
+    QJsonDocument doc(responseJson);
+    socket->write(doc.toJson());
+    socket->flush();
+}
+
+void MainWindow::handleUpdateStepProgressRequest(const QJsonObject &json, QTcpSocket *socket)
+{
+    QString username = json["username"].toString();
+    int path_id = json["path_id"].toInt();
+    int stage_order = json["stage_order"].toInt();
+    int step_order = json["step_order"].toInt();
+    bool completed = json["completed"].toBool();
+
+    qDebug() << "收到更新步骤进度请求 - 用户名:" << username << "path_id:" << path_id
+             << "stage_order:" << stage_order << "step_order:" << step_order << "completed:" << completed;
+
+    // 获取用户信息
+    User user = DatabaseManager::getInstance().getUserByUsername(username);
+    if (user.user_id == 0) {
+        qDebug() << "用户不存在:" << username;
+        sendPathResponse(socket, "error", "用户不存在");
+        return;
+    }
+
+    // 更新步骤完成状态
+    bool success = LearningPathManager::getInstance().updateStepProgress(path_id, stage_order, step_order, completed);
+
+    if (success) {
+        // 获取更新后的进度信息
+        QPair<int, int> progress = LearningPathManager::getInstance().calculateStepProgress(path_id);
+        int completedSteps = progress.first;
+        int totalSteps = progress.second;
+        double progressValue = totalSteps > 0 ? (double)completedSteps / totalSteps : 0.0;
+        int status = 0;
+        if (progressValue > 0) status = 1;
+        if (progressValue >= 1.0) status = 2;
+
+        // 构建响应
+        QJsonObject responseJson;
+        responseJson["type"] = "UpdateStepProgressResponse";
+        responseJson["status"] = "success";
+        responseJson["message"] = "步骤进度更新成功";
+        responseJson["progress"] = progressValue;
+        responseJson["path_status"] = status;
+        responseJson["completed_steps"] = completedSteps;
+        responseJson["total_steps"] = totalSteps;
+
+        QJsonDocument doc(responseJson);
+        socket->write(doc.toJson());
+        socket->flush();
+
+        qDebug() << "步骤进度更新成功 - progress:" << progressValue << "status:" << status;
+    } else {
+        sendPathResponse(socket, "error", "步骤进度更新失败");
+    }
+}
+
+void MainWindow::sendPathResponse(QTcpSocket *socket, const QString &status,
+                                   const QString &message, const QJsonObject &data)
+{
+    qDebug() << "=== sendPathResponse 开始 ===";
+    qDebug() << "socket状态:" << socket->state();
+
+    QJsonObject json;
+    json["type"] = "PathResponse";
+    json["status"] = status;
+    json["message"] = message;
+
+    if (!data.isEmpty()) {
+        for (const QString &key : data.keys()) {
+            json[key] = data[key];
+        }
+    }
+
+    QJsonDocument doc(json);
+    QByteArray responseData = doc.toJson();
+
+    qDebug() << "路径响应数据长度:" << responseData.length();
+
+    qint64 bytesWritten = socket->write(responseData);
+    socket->flush();
+
+    qDebug() << "已发送路径响应:" << bytesWritten << "字节, status:" << status;
 }

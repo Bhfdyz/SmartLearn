@@ -13,6 +13,16 @@
 #define GetKnowledgeType "GetKnowledgeType"        // 获取知识库
 #define AIChatType "AIChatType"                    // AI对话请求
 #define GetAIChatHistoryType "GetAIChatHistoryType" // 获取AI对话历史
+#define GetSessionListType "GetSessionListType"     // 获取会话列表
+#define DeleteSessionType "DeleteSessionType"       // 删除会话
+
+// 学习路径相关协议类型
+#define GenerateLearningPathType "GenerateLearningPathType"    // 生成学习路径
+#define GetLearningPathListType "GetLearningPathListType"      // 获取路径列表
+#define GetLearningPathDetailType "GetLearningPathDetailType"  // 获取路径详情
+#define UpdatePathProgressType "UpdatePathProgressType"        // 更新路径进度（阶段级别）
+#define UpdateStepProgressType "UpdateStepProgressType"        // 更新步骤进度（步骤级别）
+#define DeleteLearningPathType "DeleteLearningPathType"        // 删除路径
 
 // 注册错误码
 enum RegisterErrorCode {

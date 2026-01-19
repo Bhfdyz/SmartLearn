@@ -11,6 +11,7 @@ CONFIG += c++17 console
 SOURCES += \
     aichatmanager.cpp \
     databasemanager.cpp \
+    learningpathmanager.cpp \
     main.cpp \
     mainwindow.cpp
 
@@ -18,6 +19,7 @@ HEADERS += \
     aichatmanager.h \
     config.h \
     databasemanager.h \
+    learningpathmanager.h \
     mainwindow.h \
     user.h
 

@@ -54,8 +54,20 @@ private:
     // ========== AI对话相关 ==========
     void handleAIChatRequest(const QJsonObject &json, QTcpSocket *socket);  // 处理AI对话请求
     void handleGetAIChatHistoryRequest(const QJsonObject &json, QTcpSocket *socket);  // 获取对话历史
+    void handleGetSessionListRequest(const QJsonObject &json, QTcpSocket *socket);  // 获取会话列表
+    void handleDeleteSessionRequest(const QJsonObject &json, QTcpSocket *socket);  // 删除会话
     void sendAIChatResponse(QTcpSocket *socket, const QString &status, const QString &message,
                             const QString &content = "", const QString &sessionId = "");  // 发送AI响应
+
+    // ========== 学习路径相关 ==========
+    void handleGeneratePathRequest(const QJsonObject &json, QTcpSocket *socket);  // 生成学习路径
+    void handleGetPathListRequest(const QJsonObject &json, QTcpSocket *socket);  // 获取路径列表
+    void handleGetPathDetailRequest(const QJsonObject &json, QTcpSocket *socket);  // 获取路径详情
+    void handleDeletePathRequest(const QJsonObject &json, QTcpSocket *socket);  // 删除路径
+    void handleUpdatePathProgressRequest(const QJsonObject &json, QTcpSocket *socket);  // 更新路径进度（阶段级别）
+    void handleUpdateStepProgressRequest(const QJsonObject &json, QTcpSocket *socket);  // 更新步骤进度（步骤级别）
+    void sendPathResponse(QTcpSocket *socket, const QString &status, const QString &message,
+                          const QJsonObject &data = QJsonObject());  // 发送路径响应
 
     // ========== 验证方法 ==========
     bool validateUsername(const QString &username);

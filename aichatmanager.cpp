@@ -198,6 +198,8 @@ AIChatResponse AIChatManager::sendChatRequestSync(const QString &username, const
 
     // 构建 curl 命令
     QStringList args;
+    args << "--connect-timeout" << "10";     // 连接超时 10 秒
+    args << "--max-time" << "60";            // 最大总时间 60 秒（AI聊天）
     args << "-X" << "POST";
     args << "-H" << "Content-Type: application/json";
     args << "-H" << "Accept: application/json";
@@ -210,8 +212,8 @@ AIChatResponse AIChatManager::sendChatRequestSync(const QString &username, const
     // 启动进程
     process.start("curl", args);
 
-    // 等待完成（30秒超时）
-    if (!process.waitForFinished(30000)) {
+    // 等待完成（70秒超时 = curl max-time 60秒 + 10秒缓冲）
+    if (!process.waitForFinished(70000)) {
         response.error = "请求超时";
         qDebug() << "curl请求超时";
         return response;
