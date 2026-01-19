@@ -10,6 +10,7 @@ CONFIG += c++17
 
 SOURCES += \
     aichatpage.cpp \
+    aichatworker.cpp \
     connectmanager.cpp \
     knowledgedialog.cpp \
     learningpathpage.cpp \
@@ -23,6 +24,7 @@ SOURCES += \
 
 HEADERS += \
     aichatpage.h \
+    aichatworker.h \
     config.h \
     connectmanager.h \
     knowledgedialog.h \

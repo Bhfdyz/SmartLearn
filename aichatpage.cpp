@@ -1,4 +1,5 @@
 #include "aichatpage.h"
+#include "aichatworker.h"
 #include "connectmanager.h"
 #include "config.h"
 
@@ -15,10 +16,23 @@ AIChatPage::AIChatPage(const QString &username, QWidget *parent)
     : QWidget(parent)
     , _username(username)
     , _currentSessionId("")
+    , _workerThread(nullptr)
+    , _worker(nullptr)
 {
+    setupWorkerThread();
     setupUI();
     loadSessionList();   // 先加载会话列表
     loadChatHistory();   // 再加载聊天历史（加载最后一次会话）
+}
+
+AIChatPage::~AIChatPage()
+{
+    // 停止工作线程
+    if (_workerThread) {
+        _workerThread->quit();
+        _workerThread->wait();
+        qDebug() << "AIChatPage: Worker thread stopped";
+    }
 }
 
 void AIChatPage::setupUI()
@@ -227,6 +241,27 @@ QString AIChatPage::getCurrentTime() const
     return QDateTime::currentDateTime().toString("HH:mm");
 }
 
+void AIChatPage::setupWorkerThread()
+{
+    // 创建工作线程
+    _workerThread = new QThread(this);
+    _worker = new AIChatWorker();
+    _worker->moveToThread(_workerThread);
+
+    // 连接信号
+    connect(this, &AIChatPage::startRequest, _worker, &AIChatWorker::sendRequest);
+    connect(_worker, &AIChatWorker::requestFinished, this, &AIChatPage::onWorkerFinished);
+    connect(_worker, &AIChatWorker::requestError, this, &AIChatPage::onWorkerError);
+
+    // 线程结束时清理worker
+    connect(_workerThread, &QThread::finished, _worker, &QObject::deleteLater);
+
+    // 启动线程
+    _workerThread->start();
+
+    qDebug() << "AIChatPage: Worker thread started";
+}
+
 void AIChatPage::addMessage(const ChatMessage &msg)
 {
     _messages.append(msg);
@@ -345,26 +380,6 @@ void AIChatPage::onSendClicked()
 
 void AIChatPage::sendMessage(const QString &message)
 {
-    // 获取socket连接
-    ConnectManager &manager = ConnectManager::getInstance();
-    QTcpSocket *client = manager.getSocket();
-
-    // 确保socket已连接
-    if (client->state() != QAbstractSocket::ConnectedState) {
-        qDebug() << "AIChatPage: Socket未连接，尝试重新连接";
-        client->abort();
-        client->connectToHost(HOSTNAME, PORT);
-        if (!client->waitForConnected(3000)) {
-            QMessageBox::warning(this, "连接错误", "无法连接到服务器");
-            _sendButton->setEnabled(true);
-            _statusLabel->setText("连接失败");
-            return;
-        }
-    }
-
-    // 断开所有readyRead信号连接
-    disconnect(client, &QTcpSocket::readyRead, nullptr, nullptr);
-
     // 构造AI聊天请求
     QJsonObject json;
     json["type"] = AIChatType;
@@ -373,64 +388,69 @@ void AIChatPage::sendMessage(const QString &message)
     json["session_id"] = _currentSessionId;
 
     QJsonDocument doc(json);
-    QByteArray data = doc.toJson();
+    QString jsonData = QString::fromUtf8(doc.toJson());
 
-    qDebug() << "AIChatPage: 发送消息，会话ID:" << (_currentSessionId.isEmpty() ? "(新建)" : _currentSessionId);
+    qDebug() << "AIChatPage: 发送消息到Worker线程，会话ID:" << (_currentSessionId.isEmpty() ? "(新建)" : _currentSessionId);
 
-    // 发送请求
-    client->write(data);
-    client->flush();
+    // 通过信号发送到Worker线程（非阻塞）
+    emit startRequest(jsonData, HOSTNAME, PORT);
+}
 
-    // 等待响应
-    if (client->waitForReadyRead(30000)) {  // 30秒超时
-        QByteArray responseData = client->readAll();
-        qDebug() << "AIChatPage: 收到响应" << responseData.left(200);
+void AIChatPage::onWorkerFinished(const QByteArray &response)
+{
+    qDebug() << "AIChatPage: 收到Worker响应" << response.left(200);
 
-        QJsonDocument responseDoc = QJsonDocument::fromJson(responseData);
-        if (!responseDoc.isNull() && responseDoc.isObject()) {
-            QJsonObject responseJson = responseDoc.object();
-            QString type = responseJson["type"].toString();
-            QString status = responseJson["status"].toString();
+    QJsonDocument responseDoc = QJsonDocument::fromJson(response);
+    if (!responseDoc.isNull() && responseDoc.isObject()) {
+        QJsonObject responseJson = responseDoc.object();
+        QString type = responseJson["type"].toString();
+        QString status = responseJson["status"].toString();
 
-            if (type == "AIChatResponse" && status == "success") {
-                QString content = responseJson["content"].toString();
-                _currentSessionId = responseJson["session_id"].toString();
+        if (type == "AIChatResponse" && status == "success") {
+            QString content = responseJson["content"].toString();
+            _currentSessionId = responseJson["session_id"].toString();
 
-                // 添加AI回复
-                ChatMessage aiMsg;
-                aiMsg.role = "assistant";
-                aiMsg.content = content;
-                aiMsg.timestamp = getCurrentTime();
-                addMessage(aiMsg);
+            // 添加AI回复
+            ChatMessage aiMsg;
+            aiMsg.role = "assistant";
+            aiMsg.content = content;
+            aiMsg.timestamp = getCurrentTime();
+            addMessage(aiMsg);
 
-                _statusLabel->setText("在线");
-            } else {
-                QString errorMsg = responseJson["message"].toString();
-                qDebug() << "AI请求失败:" << errorMsg;
-
-                // 添加错误消息
-                ChatMessage errorMsgObj;
-                errorMsgObj.role = "assistant";
-                errorMsgObj.content = "抱歉，AI 服务暂时无法响应：" + errorMsg;
-                errorMsgObj.timestamp = getCurrentTime();
-                addMessage(errorMsgObj);
-
-                _statusLabel->setText("服务错误");
-            }
+            _statusLabel->setText("在线");
         } else {
-            qDebug() << "解析AI响应失败";
-            _statusLabel->setText("响应解析失败");
+            QString errorMsg = responseJson["message"].toString();
+            qDebug() << "AI请求失败:" << errorMsg;
+
+            // 添加错误消息
+            ChatMessage errorMsgObj;
+            errorMsgObj.role = "assistant";
+            errorMsgObj.content = "抱歉，AI 服务暂时无法响应：" + errorMsg;
+            errorMsgObj.timestamp = getCurrentTime();
+            addMessage(errorMsgObj);
+
+            _statusLabel->setText("服务错误");
         }
     } else {
-        qDebug() << "AI响应超时";
-        ChatMessage timeoutMsg;
-        timeoutMsg.role = "assistant";
-        timeoutMsg.content = "抱歉，请求超时，请稍后重试。";
-        timeoutMsg.timestamp = getCurrentTime();
-        addMessage(timeoutMsg);
-        _statusLabel->setText("请求超时");
+        qDebug() << "解析AI响应失败";
+        _statusLabel->setText("响应解析失败");
     }
 
+    _sendButton->setEnabled(true);
+}
+
+void AIChatPage::onWorkerError(const QString &error)
+{
+    qDebug() << "AIChatPage: Worker错误" << error;
+
+    // 添加错误消息
+    ChatMessage errorMsgObj;
+    errorMsgObj.role = "assistant";
+    errorMsgObj.content = "抱歉，请求失败：" + error;
+    errorMsgObj.timestamp = getCurrentTime();
+    addMessage(errorMsgObj);
+
+    _statusLabel->setText("请求失败");
     _sendButton->setEnabled(true);
 }
 
