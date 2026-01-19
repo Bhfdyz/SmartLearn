@@ -4,6 +4,7 @@
 #include "connectmanager.h"
 #include "config.h"
 #include "aichatpage.h"
+#include "learningpathpage.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -359,23 +360,7 @@ void MainWindow::createAIChatPage()
 
 void MainWindow::createPathPage()
 {
-    _pathPage = new QWidget();
-    _pathPage->setStyleSheet("background-color: white; border-radius: 10px;");
-
-    QVBoxLayout *layout = new QVBoxLayout(_pathPage);
-    layout->setContentsMargins(30, 30, 30, 30);
-
-    QLabel *title = new QLabel("学习路径规划", _pathPage);
-    title->setStyleSheet("font-size: 24px; font-weight: bold; color: #2c3e50;");
-    layout->addWidget(title);
-
-    QLabel *content = new QLabel("学习路径规划功能开发中...\n\n敬请期待！", _pathPage);
-    content->setStyleSheet("color: #7f8c8d; font-size: 16px;");
-    content->setAlignment(Qt::AlignCenter);
-    layout->addWidget(content);
-
-    layout->addStretch();
-
+    _pathPage = new LearningPathPage(_username, this);
     _stackedWidget->addWidget(_pathPage);
 }
 
@@ -451,6 +436,14 @@ void MainWindow::onMenuClicked(int index)
     // 切换到知识库页面时，自动刷新数据
     if (index == 1) {  // "我的知识库" 的索引是 1
         refreshKnowledgePage();
+    }
+
+    // 切换到学习路径页面时，自动刷新数据
+    if (index == 3) {  // "学习路径" 的索引是 3
+        LearningPathPage *pathPage = qobject_cast<LearningPathPage*>(_pathPage);
+        if (pathPage) {
+            pathPage->refreshPaths();
+        }
     }
 }
 

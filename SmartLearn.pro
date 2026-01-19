@@ -12,19 +12,23 @@ SOURCES += \
     aichatpage.cpp \
     connectmanager.cpp \
     knowledgedialog.cpp \
+    learningpathpage.cpp \
     logindialog.cpp \
     main.cpp \
     mainwindow.cpp \
-    registerdialog.cpp
+    registerdialog.cpp \
+    stageitem.cpp
 
 HEADERS += \
     aichatpage.h \
     config.h \
     connectmanager.h \
     knowledgedialog.h \
+    learningpathpage.h \
     logindialog.h \
     mainwindow.h \
-    registerdialog.h
+    registerdialog.h \
+    stageitem.h
 
 FORMS += \
     knowledgedialog.ui \

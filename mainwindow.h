@@ -9,7 +9,8 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 
-class AIChatPage;  // 前向声明
+class AIChatPage;      // 前向声明
+class LearningPathPage; // 前向声明
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -50,7 +51,7 @@ private:
     QWidget *_homePage;                 // 首页
     QWidget *_knowledgePage;            // 知识库页面
     AIChatPage *_aiChatPage;            // AI对话页面
-    QWidget *_pathPage;                 // 学习路径页面
+    LearningPathPage *_pathPage;        // 学习路径页面
     QWidget *_resourcePage;             // 学习资源页面
 
     void setupUI();                     // 设置UI布局
